@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 
 from usm.core.model import USM
+from usm.ops.lattice import lattice_matrix, lattice_inverse, xyz_to_frac, frac_to_xyz
 
 
 ArrayLike = Union[Iterable[float], np.ndarray]
@@ -90,8 +91,11 @@ def scale(usm: USM, factors: ArrayLike, origin: ArrayLike = (0.0, 0.0, 0.0), in_
 
 def wrap_to_cell(usm: USM, in_place: bool = False) -> USM:
     """
-    Wrap coordinates back into the unit cell (orthorhombic assumption for v0.1).
-    If pbc is False or cell parameters are not finite, no-op (returns copy unless in_place=True).
+    Wrap coordinates back into the unit cell for general triclinic lattices.
+    Behavior:
+      - If pbc is False or cell parameters are non-finite/degenerate, no-op (returns copy unless in_place=True).
+      - For orthorhombic cells (α=β=γ≈90°), use a fast-path modulo per axis.
+      - Otherwise, convert to fractional coordinates via lattice inverse, wrap into [0,1), and convert back.
     """
     out = _copy_or_inplace(usm, in_place)
     cell = out.cell or {}
@@ -105,24 +109,35 @@ def wrap_to_cell(usm: USM, in_place: bool = False) -> USM:
     beta = cell.get("beta", 90.0)
     gamma = cell.get("gamma", 90.0)
 
-    if not np.all(np.isfinite([a, b, c, alpha, beta, gamma])):
+    vals = np.array([a, b, c, alpha, beta, gamma], dtype=float)
+    if not np.all(np.isfinite(vals)):
         return out
 
-    # v0.1: assume orthorhombic (angles ~ 90 deg)
-    if not (abs(alpha - 90.0) < 1e-6 and abs(beta - 90.0) < 1e-6 and abs(gamma - 90.0) < 1e-6):
-        # Non-orthorhombic wrapping could be added later (fractional conversion), skip for now
+    xyz = out.atoms[["x", "y", "z"]].to_numpy(dtype=np.float64)
+
+    # Orthorhombic fast path (preserve existing behavior/performance).
+    if (abs(alpha - 90.0) < 1e-6) and (abs(beta - 90.0) < 1e-6) and (abs(gamma - 90.0) < 1e-6):
+        L = np.array([a, b, c], dtype=np.float64)
+        # Guard against zeros (shouldn't occur if finite and valid, but keep prior behavior)
+        L[L == 0.0] = np.nan
+        frac = xyz / L[None, :]
+        frac = frac - np.floor(frac)
+        wrapped = frac * L[None, :]
+        sel = np.isfinite(L)
+        xyz[:, sel] = wrapped[:, sel]
+        out.atoms.loc[:, ["x", "y", "z"]] = xyz
         return out
 
-    xyz = out.atoms[["x", "y", "z"]].to_numpy(dtype=float)
-    # Use modulo operation to bring within [0, L)
-    L = np.array([a, b, c], dtype=float)
-    # Avoid division by zero
-    L[L == 0.0] = np.nan
-    frac = xyz / L[None, :]
-    frac = frac - np.floor(frac)  # fractional in [0,1)
-    wrapped = frac * L[None, :]
-    # Where L is NaN (undefined), keep original
-    sel = np.isfinite(L)
-    xyz[:, sel] = wrapped[:, sel]
-    out.atoms.loc[:, ["x", "y", "z"]] = xyz
+    # General triclinic path using fractional coordinates
+    try:
+        A = lattice_matrix(float(a), float(b), float(c), float(alpha), float(beta), float(gamma))
+        A_inv = lattice_inverse(A)
+    except Exception:
+        # Invalid/degenerate cell: no-op
+        return out
+
+    frac = xyz_to_frac(A_inv, xyz)  # shape (N,3)
+    frac_wrapped = frac - np.floor(frac)  # [0,1)
+    xyz_wrapped = frac_to_xyz(A, frac_wrapped)
+    out.atoms.loc[:, ["x", "y", "z"]] = xyz_wrapped.astype(np.float64, copy=False)
     return out
