@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 
 from usm.core.model import USM
+from usm.ops.lattice import lattice_matrix, lattice_inverse, xyz_to_frac, frac_to_xyz
 
 
 def _orthorhombic_vectors(cell: Dict) -> Optional[np.ndarray]:
@@ -33,53 +34,74 @@ def _orthorhombic_vectors(cell: Dict) -> Optional[np.ndarray]:
 
 def replicate_supercell(usm: USM, na: int, nb: int, nc: int, add_image_indices: bool = True) -> USM:
     """
-    Create a supercell by integer replication along lattice directions a,b,c (orthorhombic assumption).
-    - If an orthorhombic cell is not available, raises ValueError.
-    - Bonds are replicated within each image, preserving connectivity.
-    - Optionally annotates atoms with image_i, image_j, image_k (int32).
+    Create a supercell by integer replication along lattice directions a,b,c for general triclinic cells.
+    Semantics:
+      - Requires PBC cell with finite and valid (a,b,c,alpha,beta,gamma). Raises ValueError otherwise.
+      - Replication performed in fractional space: frac_img = frac + (i,j,k), then xyz = frac_img @ A.
+      - Bonds are replicated within each image, preserving connectivity (deterministic).
+      - Optionally annotates atoms with image_i, image_j, image_k (int32).
+      - Cell lengths a,b,c are scaled by na,nb,nc respectively; angles α,β,γ are preserved.
     """
     if na <= 0 or nb <= 0 or nc <= 0:
         raise ValueError("na, nb, nc must be positive integers")
 
-    M = _orthorhombic_vectors(usm.cell)
-    if M is None:
-        raise ValueError("replicate_supercell requires orthorhombic PBC cell with finite parameters")
+    cell = usm.cell or {}
+    if not bool(cell.get("pbc", False)):
+        raise ValueError("replicate_supercell requires pbc=True with finite parameters")
+
+    a = float(cell.get("a", np.nan))
+    b = float(cell.get("b", np.nan))
+    c = float(cell.get("c", np.nan))
+    alpha = float(cell.get("alpha", 90.0))
+    beta = float(cell.get("beta", 90.0))
+    gamma = float(cell.get("gamma", 90.0))
+    vals = np.array([a, b, c, alpha, beta, gamma], dtype=float)
+    if not np.all(np.isfinite(vals)):
+        raise ValueError("replicate_supercell requires finite a,b,c,alpha,beta,gamma")
+
+    # Build lattice and inverse; raise ValueError on degeneracy
+    try:
+        A = lattice_matrix(a, b, c, alpha, beta, gamma)
+        A_inv = lattice_inverse(A)
+    except Exception as e:
+        raise ValueError(f"Invalid or singular lattice: {e}")
 
     atoms = usm.atoms.reset_index(drop=True).copy()
-    xyz = atoms[["x", "y", "z"]].to_numpy(dtype=float)
+    xyz = atoms[["x", "y", "z"]].to_numpy(dtype=np.float64)
+    base_aids = atoms["aid"].to_numpy().astype(int, copy=False)
 
-    # Prepare output atoms by tiling coordinates
+    # Convert to fractional once
+    frac = xyz_to_frac(A_inv, xyz)  # (N,3)
+
     images: List[pd.DataFrame] = []
     bonds_images: List[pd.DataFrame] = []
 
-    n_atoms = len(atoms)
-    base_aids = atoms["aid"].to_numpy().astype(int)
-
-    # Compute translation vectors for each image
-    a_vec, b_vec, c_vec = M
     idx = 0
-    for i in range(na):
-        for j in range(nb):
-            for k in range(nc):
-                t = i * a_vec + j * b_vec + k * c_vec
+    for i in range(int(na)):
+        for j in range(int(nb)):
+            for k in range(int(nc)):
+                shift = np.array([float(i), float(j), float(k)], dtype=np.float64)
+                frac_img = frac + shift[None, :]
+                xyz_img = frac_to_xyz(A, frac_img)
+
                 img_atoms = atoms.copy()
-                img_atoms["x"] = xyz[:, 0] + t[0]
-                img_atoms["y"] = xyz[:, 1] + t[1]
-                img_atoms["z"] = xyz[:, 2] + t[2]
+                img_atoms["x"] = xyz_img[:, 0]
+                img_atoms["y"] = xyz_img[:, 1]
+                img_atoms["z"] = xyz_img[:, 2]
                 if add_image_indices:
                     img_atoms["image_i"] = np.int32(i)
                     img_atoms["image_j"] = np.int32(j)
                     img_atoms["image_k"] = np.int32(k)
-                # Temporary keep old aid for bond remap
+                # Temporary columns for remap
                 img_atoms["_old_aid"] = base_aids
                 img_atoms["_img_idx"] = idx
                 images.append(img_atoms)
 
                 if usm.bonds is not None and len(usm.bonds) > 0:
                     bdf = usm.bonds.copy()
-                    # We'll remap after concatenation using a stable mapping
                     bdf["_img_idx"] = idx
                     bonds_images.append(bdf)
+
                 idx += 1
 
     all_atoms = pd.concat(images, ignore_index=True)
@@ -89,16 +111,18 @@ def replicate_supercell(usm: USM, na: int, nb: int, nc: int, add_image_indices: 
     all_atoms.insert(0, "aid", np.arange(len(all_atoms), dtype=np.int32))
 
     # Build mapping (old_aid, img_idx) -> new_aid
-    key = pd.MultiIndex.from_arrays([all_atoms["_old_aid"].to_numpy(), all_atoms["_img_idx"].to_numpy()])
+    key = pd.MultiIndex.from_arrays(
+        [all_atoms["_old_aid"].to_numpy(), all_atoms["_img_idx"].to_numpy()]
+    )
     new_aid_series = pd.Series(all_atoms["aid"].to_numpy(), index=key)
     # Clean temp columns
     all_atoms.drop(columns=["_old_aid", "_img_idx"], inplace=True, errors="ignore")
 
-    # Replicate bonds if any
+    # Replicate/remap bonds deterministically
     new_bonds = None
     if bonds_images:
         bcat = pd.concat(bonds_images, ignore_index=True)
-        # Map endpoints for each image independently
+
         def remap_endpoints(row):
             img_idx = int(row["_img_idx"])
             a1_old = int(row["a1"])
@@ -119,6 +143,7 @@ def replicate_supercell(usm: USM, na: int, nb: int, nc: int, add_image_indices: 
         bcat["a1"] = a1_new_list
         bcat["a2"] = a2_new_list
         bcat = bcat.dropna(subset=["a1", "a2"]).copy()
+
         # Normalize a1 < a2
         a1v = bcat["a1"].astype("int32").to_numpy()
         a2v = bcat["a2"].astype("int32").to_numpy()
@@ -129,13 +154,17 @@ def replicate_supercell(usm: USM, na: int, nb: int, nc: int, add_image_indices: 
             a2v[swap] = tmp
         bcat["a1"] = a1v
         bcat["a2"] = a2v
+
         # Drop helper column
         bcat.drop(columns=["_img_idx"], inplace=True, errors="ignore")
-        # Deduplicate bonds across images just in case (shouldn't be needed)
-        bcat = bcat.drop_duplicates(subset=["a1", "a2", "order"], keep="first").reset_index(drop=True)
-        new_bonds = bcat
+        # Deduplicate bonds across images (safety)
+        if "order" in bcat.columns:
+            bcat = bcat.drop_duplicates(subset=["a1", "a2", "order"], keep="first")
+        else:
+            bcat = bcat.drop_duplicates(subset=["a1", "a2"], keep="first")
+        new_bonds = bcat.reset_index(drop=True)
 
-    # Update cell dimensions by scaling
+    # Update cell: scale lengths, preserve angles
     new_cell = dict(usm.cell)
     new_cell["a"] = float(new_cell.get("a", np.nan)) * na
     new_cell["b"] = float(new_cell.get("b", np.nan)) * nb
