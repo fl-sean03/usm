@@ -5,8 +5,8 @@ Scope and non-goals (v0.1)
   - No aromaticity detection beyond MDF connections parsing (order=1.5 where provided)
   - No valence checks, bond typing heuristics, or force-field parameterization
 - Crystallography
-  - Only orthorhombic wrapping/replication supported (angles ~ 90°)
-  - No general triclinic fractional conversion (planned upgrade)
+  - General triclinic lattice support for wrap_to_cell and replicate_supercell via fractional coordinates
+  - Orthorhombic behaviors preserved; float64 math; frac↔xyz round-trip property tests ≤ 1e-12
 - Formats
   - Primary focus on Materials Studio CAR/MDF
   - PDB exporter is minimal (ATOM/TER/END; optional CRYST1)

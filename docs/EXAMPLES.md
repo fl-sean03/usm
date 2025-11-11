@@ -78,17 +78,22 @@ renum = renumber_atoms(merged, order_by=["mol_index","name"])
 # Derive molecule ids mid (optional)
 renum2 = renumber_molecules(renum)
 
-5) Supercell replication (orthorhombic cells)
+5) Supercell replication (general triclinic)
 Python
 from usm.ops.replicate import replicate_supercell
 
-# Provide a cell for WAT (CAR example has PBC=OFF, so set one for demo)
-with_cell = wat_car.copy()
-with_cell.cell.update({"pbc": True, "a": 10.0, "b": 12.0, "c": 14.0, "alpha": 90.0, "beta": 90.0, "gamma": 90.0})
+# Example: monoclinic cell (beta=100°)
+mono = wat_car.copy()
+mono.cell.update({"pbc": True, "a": 10.0, "b": 12.0, "c": 8.0, "alpha": 90.0, "beta": 100.0, "gamma": 90.0})
+mono_rep = replicate_supercell(mono, 2, 1, 3)
 
-# Replicate 2x1x1 along a
-replicated = replicate_supercell(with_cell, 2, 1, 1)
-print(len(wat_car.atoms), len(replicated.atoms))  # tripled count equals 2 * original
+# Example: hexagonal cell (gamma=120°)
+hexa = wat_car.copy()
+hexa.cell.update({"pbc": True, "a": 10.0, "b": 10.0, "c": 15.0, "alpha": 90.0, "beta": 90.0, "gamma": 120.0})
+hexa_rep = replicate_supercell(hexa, 3, 2, 1)
+
+print(len(mono.atoms), len(mono_rep.atoms))
+print(len(hexa.atoms), len(hexa_rep.atoms))
 
 6) USM Bundle: Save and load (Parquet preferred, CSV fallback)
 Python
@@ -135,5 +140,5 @@ assert name_conn1 == name_conn2
 
 Tips
 - Determinism: All operations produce stable ordering and contiguous ids (aid/bid/mid) according to documented policies.
-- PBC: wrap_to_cell and replicate_supercell currently assume orthorhombic cells (angles ~ 90°).
+- PBC: wrap_to_cell and replicate_supercell support general triclinic lattices via fractional coordinates; orthorhombic fast path preserved for performance.
 - Bonds: Normalized from MDF connections; raw tokens are preserved for lossless MDF round-trip.
