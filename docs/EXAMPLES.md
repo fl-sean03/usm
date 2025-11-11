@@ -26,6 +26,8 @@ save_car(usm2, "output/WAT_shifted.car", preserve_headers=True)
 # Save to MDF (synthesizes a canonical header if none preserved)
 save_mdf(usm2, "output/WAT_shifted.mdf", preserve_headers=False)
 
+Note
+- The MDF writer preserves formal_charge tokens without truncation. Tokens longer than width 3 (e.g., 1/2+) are emitted verbatim with single-space field delimiters, ensuring lossless round-trip via [python.load_mdf()](src/usm/io/mdf.py:243) and [python.save_mdf()](src/usm/io/mdf.py:378).
 # Save to PDB (minimal writer)
 save_pdb(usm2, "output/WAT_shifted.pdb")
 

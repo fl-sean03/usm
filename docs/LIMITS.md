@@ -18,6 +18,7 @@ I/O and round-trip fidelity
 - MDF
   - @column and !Date lines preserved when present (lossless mode)
   - connections_raw tokens preserved verbatim; normalized export available by flag
+  - formal_charge tokens preserved without truncation; writer emits tokens verbatim (e.g., 1/2+) using single-space field delimiters, and right-aligns standard-width values to width 3 for backward compatibility
   - Coordinates not stored in MDF; USM retains NaN for xyz fields from MDF-only imports
 
 Bundles and portability
