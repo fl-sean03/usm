@@ -9,7 +9,7 @@ Scope and non-goals (v0.1)
   - Orthorhombic behaviors preserved; float64 math; frac↔xyz round-trip property tests ≤ 1e-12
 - Formats
   - Primary focus on Materials Studio CAR/MDF
-  - PDB exporter is minimal (ATOM/TER/END; optional CRYST1)
+  - PDB exporter: ATOM/TER/END with optional CRYST1; opt-in CONECT (from bonds) and single-model MODEL/ENDMDL framing are available. Defaults preserve prior behavior (no CONECT, no MODEL).
 - GUI or interactive visualization not part of scope
 
 I/O and round-trip fidelity
@@ -23,12 +23,17 @@ I/O and round-trip fidelity
 
 Bundles and portability
 - Bundles prefer Parquet; CSV fallback used automatically if no Parquet engine is available
-- When using CSV fallback, loading infers dtypes via USM schema coercion; string columns and Int32 columns remain compatible
+- CSV fallback: writer emits numeric columns with high precision (float_format="%.17g") for deterministic numeric round-trips; loader coerces dtypes via USM schema so string and nullable Int32 columns remain compatible
+- Load precedence when both formats exist: prefer Parquet if readable; otherwise fall back to CSV
 
 Determinism and IDs
 - All operations (selection, transforms, merge, replicate, renumber) produce deterministic outputs and contiguous IDs
 - compose_on_keys depends on the uniqueness of key tuples (mol_label, mol_index, name); duplicates are resolved by last-wins semantics when joining
-
+- Composition diagnostics (v0.1+):
+  - Coverage metrics over unique key tuples: matched_count, left_only_count, right_only_count, primary_total, secondary_total, coverage_ratio
+  - Policy handling: policy="silent" (default) attaches metrics under provenance["compose_coverage"]; policy="warn" also appends a deterministic message to provenance.parse_notes when coverage is below coverage_threshold; policy="error_below_coverage" raises ValueError below threshold
+  - Default coverage_threshold=0.95; configurable by callers (e.g., workspace runner)
+  - Metrics and messages are deterministic and stable across runs for identical inputs
 Performance and scale
 - Designed to scale linearly to ~1e5 atoms with typical operations
 - String-heavy columns (e.g., many unique names or types) can increase memory; consider reducing cardinality or using categorical encodings in future versions
@@ -40,7 +45,7 @@ Error handling and fallbacks
 Future roadmap (shortlist)
 - Full triclinic lattice support (fractional coordinate transforms) for wrap/replicate
 - Additional operations: symmetry expansion, constrained selections, map/unmap fractional <-> Cartesian
-- Richer PDB exporter (MODEL/ENDMDL; altLoc, occupancy/tempFactor formatting; CONECT from bonds)
+- PDB exporter roadmap: multi-model trajectories; additional record types (e.g., ANISOU, SSBOND, HELIX/SHEET); serial overflow handling (> 99999); refined atom-name justification per element.
 - Optional polars/pyarrow interchange for large-scale performance
 - Additional text format importers (e.g., XYZ, GRO) and writers as needed
 - Improved MDF exporter with configurable formatting profiles to better match downstream tool expectations

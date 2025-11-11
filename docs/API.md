@@ -40,15 +40,23 @@ API reference (selected)
     - Preserved header/footer written byte-for-byte when present.
 
 - PDB
-  - save_pdb(usm: USM, path: str) -> str
-    - Minimal PDB writer (ATOM, TER, END). Writes CRYST1 when pbc is True and all parameters are finite (orthorhombic assumed).
-    - Derives residue fields if absent (mol_block_name -> resName, mol_index -> resSeq, default chain A).
+  - save_pdb(usm: USM, path: str, include_conect: bool = False, include_model: bool = False, model_index: int = 1, conect_policy: str = "dedup") -> str
+    - Minimal PDB writer (ATOM, TER, END). Writes CRYST1 when pbc is True and all lattice parameters are finite. Optional CONECT from bonds and single-model MODEL/ENDMDL framing.
+    - Flags:
+      - include_conect: write CONECT records derived from usm.bonds (a1,a2 mapped to serial=aid+1); neighbors sorted; max 4 per line; chunk as needed.
+      - conect_policy: "dedup" (default; emit bond once on lower-serial) or "full" (both directions).
+      - include_model: wrap records in MODEL {model_index} ... ENDMDL; CRYST1 appears after MODEL when present.
+    - Deterministic output ordering and formatting; ATOM element/name justification unchanged.
 
 - Bundle I/O
   - save_bundle(usm: USM, folder: str) -> str
     - Save USM to a folder with atoms/bonds/molecules and a manifest.json. Tries Parquet; falls back to CSV automatically if no Parquet engine is available.
+    - CSV fallback writes numeric columns with high precision (float_format="%.17g") for deterministic numeric round-trips.
   - load_bundle(folder: str) -> USM
     - Load a bundle written by save_bundle. Supports both Parquet and CSV.
+    - Precedence: prefers Parquet when present/readable; falls back to CSV. If both exist, Parquet wins by default.
+    - Strict manifest handling with clear ValueError messages for missing/unknown version, missing files, or row-count mismatches.
+    - Deterministic: preserves stored row order; [USM.__post_init__](src/usm/core/model.py:98) enforces schema/dtypes and contiguous IDs; [USM.validate_basic()](src/usm/core/model.py:135) sanity-checks required fields.
 
 - Selection (return new USM with deterministically reindexed aids)
   - select_by_element(usm, elements: Iterable[str]) -> USM

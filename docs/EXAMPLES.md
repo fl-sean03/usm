@@ -31,6 +31,22 @@ Note
 # Save to PDB (minimal writer)
 save_pdb(usm2, "output/WAT_shifted.pdb")
 
+# Optional: include CONECT from bonds (deduplicated, 4 neighbors per line, deterministic)
+save_pdb(usm2, "output/WAT_shifted_conect.pdb", include_conect=True)
+
+# Optional: wrap in a single MODEL/ENDMDL block (MODEL index defaults to 1)
+save_pdb(usm2, "output/WAT_shifted_model.pdb", include_model=True, model_index=1)
+
+# Optional: combine MODEL and CONECT with the "full" policy (emit both directions)
+save_pdb(
+  usm2,
+  "output/WAT_shifted_model_conect.pdb",
+  include_model=True,
+  model_index=1,
+  include_conect=True,
+  conect_policy="full",
+)
+
 2) Load DOP (MDF), inspect bonds, select, and export MDF
 Python
 from usm.io.mdf import load_mdf, save_mdf
@@ -66,6 +82,32 @@ composed = compose_on_keys(wat_car, wat_mdf)  # keys = ["mol_label","mol_index",
 # Bonds now present; connections preserved inside atoms.connections_raw if needed for MDF round-trip
 print(composed.bonds.head())
 
+# Policy-controlled coverage diagnostics (optional)
+# Compute composition coverage over unique keys; attach metrics to provenance and optionally return a report dict
+from usm.ops.compose import compose_on_keys
+
+composed2, report = compose_on_keys(
+    wat_car,
+    wat_mdf,
+    policy="warn",                 # "silent" (default), "warn", or "error_below_coverage"
+    coverage_threshold=0.95,       # trigger warn/error when coverage_ratio < threshold
+    return_report=True,            # also return structured coverage metrics
+)
+print("compose coverage:", report)  # e.g., {"coverage_ratio": 1.0, "matched_count": N, ...}
+
+# You can also read the same metrics from provenance
+print((composed2.provenance or {}).get("compose_coverage", {}))
+
+# If below threshold and policy="warn", a deterministic message is appended to provenance.parse_notes
+if report["coverage_ratio"] < report["coverage_threshold"]:
+    print("Warning:", (composed2.provenance or {}).get("parse_notes", ""))
+
+# If policy="error_below_coverage", compose_on_keys raises ValueError when coverage is insufficient
+try:
+    compose_on_keys(wat_car, wat_mdf, policy="error_below_coverage", coverage_threshold=0.95)
+except ValueError as e:
+    print("Composition failed:", e)
+
 4) Merge multiple structures and renumber consistently
 Python
 from usm.ops.merge import merge_structures
@@ -99,12 +141,18 @@ print(len(hexa.atoms), len(hexa_rep.atoms))
 
 6) USM Bundle: Save and load (Parquet preferred, CSV fallback)
 Python
-from usm.bundle.io import save_bundle, load_bundle
+from usm.bundle.io import save_bundle, load_bundle  # [save_bundle()](src/usm/bundle/io.py:43), [load_bundle()](src/usm/bundle/io.py:118)
 
-# Compose WAT CAR + MDF to get coords + bonds, then serialize
+# Compose WAT CAR + MDF to get coords + bonds, then serialize and validate
 bundle_dir = save_bundle(composed, "output/usm_bundle_wat")
 loaded = load_bundle(bundle_dir)
-print(len(loaded.atoms), "atoms")
+
+# Basic validation of round-trip counts and metadata
+assert len(loaded.atoms) == len(composed.atoms)
+assert (0 if composed.bonds is None else len(composed.bonds)) == (0 if loaded.bonds is None else len(loaded.bonds))
+assert (0 if composed.molecules is None else len(composed.molecules)) == (0 if loaded.molecules is None else len(loaded.molecules))
+assert dict(loaded.cell) == dict(composed.cell)
+print("bundle round-trip ok:", True)
 
 7) Round-trip fidelity checks (snippets)
 - CAR round-trip WAT: load → save_car(preserve_headers=True) → load; verify header/footer lines identical; xyz within tolerance
@@ -125,22 +173,53 @@ xyz2 = u2.atoms.sort_values("aid")[["x","y","z"]].to_numpy()
 assert np.allclose(xyz1, xyz2, atol=1e-5)
 
 - MDF round-trip WAT: load → save_mdf(preserve_headers=True, write_normalized_connections=False) → load; verify headers equal and connections_raw identical per atom name
-Python
-from usm.io.mdf import load_mdf, save_mdf
-
-m1 = load_mdf("msiExamples/WAT.mdf")
-save_mdf(m1, "output/WAT_rt.mdf", preserve_headers=True, write_normalized_connections=False)
-m2 = load_mdf("output/WAT_rt.mdf")
-
-h1 = (m1.preserved_text or {}).get("mdf_header_lines", [])
-h2 = (m2.preserved_text or {}).get("mdf_header_lines", [])
-assert h1 == h2
-
-name_conn1 = dict(zip(m1.atoms["name"].astype(str), m1.atoms["connections_raw"].fillna("").astype(str)))
-name_conn2 = dict(zip(m2.atoms["name"].astype(str), m2.atoms["connections_raw"].fillna("").astype(str)))
-assert name_conn1 == name_conn2
-
-Tips
+ Python
+ from usm.io.mdf import load_mdf, save_mdf
+ 
+ m1 = load_mdf("msiExamples/WAT.mdf")
+ save_mdf(m1, "output/WAT_rt.mdf", preserve_headers=True, write_normalized_connections=False)
+ m2 = load_mdf("output/WAT_rt.mdf")
+ 
+ h1 = (m1.preserved_text or {}).get("mdf_header_lines", [])
+ h2 = (m2.preserved_text or {}).get("mdf_header_lines", [])
+ assert h1 == h2
+ 
+ name_conn1 = dict(zip(m1.atoms["name"].astype(str), m1.atoms["connections_raw"].fillna("").astype(str)))
+ name_conn2 = dict(zip(m2.atoms["name"].astype(str), m2.atoms["connections_raw"].fillna("").astype(str)))
+ assert name_conn1 == name_conn2
+ 
+ Runner numeric checks (LB_SF_carmdf)
+ - After MDF round-trip, the workspace runner [run_scenario()](workspaces/usm_lb_sf_carmdf_v1/run.py:260) computes per-column metrics for MDF numeric fields.
+ - The summary.json contains:
+   {
+     "validations": {
+       "mdf_header_equal": true,
+       "mdf_connections_equal": true,
+       "mdf_numeric": {
+         "charge": { "max_abs_diff": 0.0, "exact_equal": true, "atol_used": 1e-06, "rtol_used": 0.0 },
+         "occupancy": { "max_abs_diff": 0.0, "exact_equal": true, "atol_used": 1e-06, "rtol_used": 0.0 },
+         "xray_temp_factor": { "max_abs_diff": 0.0, "exact_equal": true, "atol_used": 1e-06, "rtol_used": 0.0 },
+         "switching_atom": { "exact_equal": true, "mismatch_count": 0 },
+         "oop_flag": { "exact_equal": true, "mismatch_count": 0 },
+         "chirality_flag": { "exact_equal": true, "mismatch_count": 0 }
+       },
+       "mdf_numeric_ok": true,
+       "mdf_roundtrip_ok": true
+     }
+   }
+ - Configure tolerances per float column via config key mdf_numeric_tolerances. Value can be a number (atol) or an object { "atol": float, "rtol": float }.
+   Example:
+   {
+     "outputs_dir": "workspaces/usm_lb_sf_carmdf_v1/outputs",
+     "scenarios": { "A": { "car": "assets/LB_SF_carmdf/FAPbBr2I.car", "mdf": "assets/LB_SF_carmdf/FAPbBr2I.mdf" } },
+     "mdf_numeric_tolerances": {
+       "charge": 1e-6,
+       "occupancy": { "atol": 1e-6, "rtol": 0.0 },
+       "xray_temp_factor": 1e-6
+     }
+   }
+ 
+ Tips
 - Determinism: All operations produce stable ordering and contiguous ids (aid/bid/mid) according to documented policies.
 - PBC: wrap_to_cell and replicate_supercell support general triclinic lattices via fractional coordinates; orthorhombic fast path preserved for performance.
 - Bonds: Normalized from MDF connections; raw tokens are preserved for lossless MDF round-trip.
