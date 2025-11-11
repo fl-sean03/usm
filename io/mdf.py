@@ -469,8 +469,11 @@ def save_mdf(usm: USM, path: str, preserve_headers: bool = True, write_normalize
         occ_str = _format_float_mdf(occ_val, 4)
         xrf_str = _format_float_mdf(xrf_val, 4)
 
+        # Preserve formal_charge token without truncation; align to width 3 only for short tokens
+        fc_field = formal_charge if len(formal_charge) > 3 else f"{formal_charge:>3s}"
+
         conns = _compose_connections_for_atom(row, atoms, usm.bonds, write_normalized_connections)
-        line = f"{prefix:<18s} {element:>2s} {atom_type:<6s} {charge_group:<6s} {isotope:>5s} {formal_charge:>3s} {charge:>8s} {switching_atom:d} {oop_flag:d} {chirality_flag:d} {occ_str:>7s}  {xrf_str:>7s}"
+        line = f"{prefix:<18s} {element:>2s} {atom_type:<6s} {charge_group:<6s} {isotope:>5s} {fc_field} {charge:>8s} {switching_atom:d} {oop_flag:d} {chirality_flag:d} {occ_str:>7s}  {xrf_str:>7s}"
         if conns:
             line = f"{line} {conns}"
         lines.append(line)
