@@ -20,7 +20,7 @@ for the CALF-20 example in assets/NIST.
 
 If you need a full crystallography pipeline (symmetry expansion, disorder handling, etc.),
 we should consider adding an optional third-party dependency (gemmi / ASE / pymatgen) behind
-a soft import. For now, keep MolSAIC self-contained.
+a soft import. For now, keep USM dependency-light.
 
 Public API:
 - load_cif(path: str, *, mol_label="XXXX", mol_index=1, mol_block_name=None) -> USM
