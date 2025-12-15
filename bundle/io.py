@@ -59,7 +59,7 @@ def save_bundle(usm: USM, folder: str) -> str:
         usm.atoms.to_parquet(atoms_path, index=False)
     except Exception:
         atoms_path = out_dir / "atoms.csv"
-        usm.atoms.to_csv(atoms_path, index=False)
+        usm.atoms.to_csv(atoms_path, index=False, float_format="%.17g")
 
     # Bonds
     bonds_path = None
@@ -69,7 +69,7 @@ def save_bundle(usm: USM, folder: str) -> str:
             usm.bonds.to_parquet(bonds_path, index=False)
         except Exception:
             bonds_path = out_dir / "bonds.csv"
-            usm.bonds.to_csv(bonds_path, index=False)
+            usm.bonds.to_csv(bonds_path, index=False, float_format="%.17g")
 
     # Molecules
     molecules_path = None
@@ -79,7 +79,7 @@ def save_bundle(usm: USM, folder: str) -> str:
             usm.molecules.to_parquet(molecules_path, index=False)
         except Exception:
             molecules_path = out_dir / "molecules.csv"
-            usm.molecules.to_csv(molecules_path, index=False)
+            usm.molecules.to_csv(molecules_path, index=False, float_format="%.17g")
 
     manifest = {
         "version": VERSION,
@@ -117,7 +117,97 @@ def save_bundle(usm: USM, folder: str) -> str:
 
 def load_bundle(folder: str) -> USM:
     """
-    Optional loader for completeness. Not used by current workflows.
-    Provided as a minimal placeholder; implement as needed.
+    Load a USM bundle written by save_bundle.
+    Behavior:
+      - Parquet preferred; CSV fallback (and when both exist, prefer Parquet).
+      - Strict manifest handling; raises ValueError with actionable messages on issues.
+      - Preserves stored row order; USM.__post_init__ enforces schema/dtypes/contiguous IDs.
     """
-    raise NotImplementedError("load_bundle is not required by current workspaces")
+    base = Path(folder)
+    manifest_path = base / "manifest.json"
+    if not manifest_path.exists():
+        raise ValueError(f"USM bundle missing manifest.json at {manifest_path}")
+    try:
+        with manifest_path.open("r", encoding="utf-8") as f:
+            manifest = json.load(f)
+    except Exception as e:
+        raise ValueError(f"Failed to parse manifest.json: {e}")
+
+    version = manifest.get("version")
+    if version != VERSION:
+        raise ValueError(f"Unsupported bundle version '{version}'; expected '{VERSION}'")
+
+    tables = manifest.get("tables") or {}
+    if "atoms" not in tables:
+        raise ValueError("Manifest missing required 'tables.atoms' entry")
+
+    def _get_table_entry(name: str) -> Dict[str, Any]:
+        t = tables.get(name) or {}
+        # Normalize None/"null"/"" to None for path
+        path_val = t.get("path")
+        t["path"] = None if path_val in (None, "", "null") else str(path_val)
+        t["row_count"] = int(t.get("row_count") or 0)
+        t["dtypes"] = t.get("dtypes") or {}
+        return t
+
+    atoms_meta = _get_table_entry("atoms")
+    bonds_meta = _get_table_entry("bonds")
+    mols_meta = _get_table_entry("molecules")
+
+    def _read_df(rel_path: Optional[str], required: bool, label: str, expected_rows: int) -> Optional[pd.DataFrame]:
+        if rel_path is None:
+            if required:
+                raise ValueError(f"Manifest marks {label} as required but no path provided")
+            return None
+        p = base / rel_path
+        if not p.exists():
+            # Try fallback when manifest references Parquet but file missing and CSV exists (or vice versa)
+            alt = p.with_suffix(".csv") if p.suffix.lower() == ".parquet" else p.with_suffix(".parquet")
+            if alt.exists():
+                p = alt
+            else:
+                raise ValueError(f"Bundle incomplete: expected file for {label} at {p} (or {alt})")
+        # Prefer parquet when both exist; if p is csv but parquet sibling exists, try parquet first
+        if p.suffix.lower() == ".csv":
+            parquet_sibling = p.with_suffix(".parquet")
+            if parquet_sibling.exists():
+                try:
+                    df = pd.read_parquet(parquet_sibling)
+                except Exception:
+                    # Fall back to CSV
+                    df = pd.read_csv(p)
+            else:
+                df = pd.read_csv(p)
+        else:
+            # p is parquet
+            try:
+                df = pd.read_parquet(p)
+            except Exception as e:
+                # Fall back to CSV counterpart if available
+                csv_alt = p.with_suffix(".csv")
+                if csv_alt.exists():
+                    df = pd.read_csv(csv_alt)
+                else:
+                    raise ValueError(f"Failed to read Parquet for {label} at {p}: {e}. No CSV fallback at {csv_alt}.")
+        # Basic row count validation if provided (>0 or explicitly 0)
+        if expected_rows is not None:
+            if int(len(df)) != int(expected_rows):
+                raise ValueError(f"Row count mismatch for {label}: manifest={expected_rows} actual={len(df)}")
+        return df
+
+    atoms_df = _read_df(atoms_meta["path"], required=True, label="atoms", expected_rows=atoms_meta.get("row_count", None))
+    bonds_df = _read_df(bonds_meta["path"], required=False, label="bonds", expected_rows=bonds_meta.get("row_count", None))
+    mols_df = _read_df(mols_meta["path"], required=False, label="molecules", expected_rows=mols_meta.get("row_count", None))
+
+    # Construct USM; __post_init__ will enforce schema/dtypes and contiguous IDs
+    usm = USM(
+        atoms=atoms_df,
+        bonds=bonds_df,
+        molecules=mols_df,
+        cell=dict(manifest.get("cell") or {}),
+        provenance=dict(manifest.get("provenance") or {}),
+        preserved_text=dict(manifest.get("preserved_text") or {}),
+    )
+    # Validate basic invariants
+    usm.validate_basic()
+    return usm

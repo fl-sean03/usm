@@ -189,7 +189,7 @@ assert np.allclose(xyz1, xyz2, atol=1e-5)
  assert name_conn1 == name_conn2
  
  Runner numeric checks (LB_SF_carmdf)
- - After MDF round-trip, the workspace runner [run_scenario()](workspaces/usm_lb_sf_carmdf_v1/run.py:260) computes per-column metrics for MDF numeric fields.
+ - After MDF round-trip, the workspace runner [run_scenario()](workspaces/other/usm_lb_sf_carmdf_v1/run.py:260) computes per-column metrics for MDF numeric fields.
  - The summary.json contains:
    {
      "validations": {
@@ -210,7 +210,7 @@ assert np.allclose(xyz1, xyz2, atol=1e-5)
  - Configure tolerances per float column via config key mdf_numeric_tolerances. Value can be a number (atol) or an object { "atol": float, "rtol": float }.
    Example:
    {
-     "outputs_dir": "workspaces/usm_lb_sf_carmdf_v1/outputs",
+     "outputs_dir": "workspaces/other/usm_lb_sf_carmdf_v1/outputs",
      "scenarios": { "A": { "car": "assets/LB_SF_carmdf/FAPbBr2I.car", "mdf": "assets/LB_SF_carmdf/FAPbBr2I.mdf" } },
      "mdf_numeric_tolerances": {
        "charge": 1e-6,
@@ -223,3 +223,61 @@ assert np.allclose(xyz1, xyz2, atol=1e-5)
 - Determinism: All operations produce stable ordering and contiguous ids (aid/bid/mid) according to documented policies.
 - PBC: wrap_to_cell and replicate_supercell support general triclinic lattices via fractional coordinates; orthorhombic fast path preserved for performance.
 - Bonds: Normalized from MDF connections; raw tokens are preserved for lossless MDF round-trip.
+
+8) Multi-generation writer stability checks (optional)
+- Purpose: Assert multi-generation stability of CAR/MDF writers by comparing only the deterministic core sections.
+- Runner integration: enable in the workspace runner [run_scenario()](workspaces/other/usm_lb_sf_carmdf_v1/run.py:345) via config key "stability_checks".
+
+Runner config snippet (JSON)
+{
+  "outputs_dir": "workspaces/other/usm_lb_sf_carmdf_v1/outputs",
+  "stability_checks": true,
+  "scenarios": {
+    "A": {
+      "car": "assets/LB_SF_carmdf/FAPbBr2I.car",
+      "mdf": "assets/LB_SF_carmdf/FAPbBr2I.mdf"
+    }
+  }
+}
+
+Behavior
+- CAR: load → save gen2 → load gen2 → save gen3, using [save_car()](src/usm/io/car.py:187) with preserve_headers=False for deterministic header synthesis. Compare only atom lines that match [ATOM_LINE_RE](src/usm/io/car.py:17).
+- MDF (canonical): load → save gen2 → load gen2 → save gen3, using [save_mdf()](src/usm/io/mdf.py:378) with preserve_headers=False and write_normalized_connections=True. Compare only topology lines that match [MDF_LINE_RE](src/usm/io/mdf.py:18).
+
+Outputs
+- Files (for debugging on failure):
+  - outputs/{scenario}/car_gen2.car, car_gen3.car
+  - outputs/{scenario}/mdf_gen2.mdf, mdf_gen3.mdf
+- Summary fields in outputs/{scenario}/summary.json:
+  - validations.car_text_stable_across_generations: true|false
+  - validations.mdf_text_stable_across_generations: true|false
+
+Notes
+- The CAR comparison excludes date and non-deterministic headers by comparing only lines matching [ATOM_LINE_RE](src/usm/io/car.py:17).
+- The MDF comparison is performed under a canonical writer mode to avoid dependence on original headers or raw connections, using the normalized connection emission of [save_mdf()](src/usm/io/mdf.py:378).
+8) Workspace autodiscover (LB_SF_carmdf)
+JSON
+{
+  "outputs_dir": "workspaces/other/usm_lb_sf_carmdf_v1/outputs",
+  "autodiscover": {
+    "root": "assets/LB_SF_carmdf",
+    "include_patterns": ["*.mdf", "*.car"],
+    "pairing": { "mode": "stem_exact" }
+  },
+  "stability_checks": true,
+  "ops": {
+    "wrap_to_cell": true,
+    "replicate": [2, 1, 1],
+    "select_first_n": 100,
+    "transform": { "translate": [0.1, 0.0, 0.0], "rotate_deg_z": 5 }
+  }
+}
+
+- Purpose: Automatically discover .car/.mdf under assets/LB_SF_carmdf, pair by filename stem, and run scenarios via [workspaces/other/usm_lb_sf_carmdf_v1/run.py](workspaces/other/usm_lb_sf_carmdf_v1/run.py:1).
+- Pairing: Lowercase stem grouping; when both stem.car and stem.mdf exist they form a paired scenario; otherwise single-input scenario is created.
+- Run:
+  - python workspaces/other/usm_lb_sf_carmdf_v1/run.py --config workspaces/other/usm_lb_sf_carmdf_v1/config.json
+- Artefacts:
+  - Top-level inventory: workspaces/other/usm_lb_sf_carmdf_v1/outputs/_inventory.json
+  - Per-scenario folder: composed.car/.mdf/.pdb, round-trip files, stability files (car_gen2/3, mdf_gen2/3), optional ops outputs, bundle folder.
+- Coverage: Paired scenarios compose CAR coords with MDF topology using [compose_on_keys()](src/usm/ops/compose.py:13) (policy "warn" by default) and record coverage metrics in summary.json.

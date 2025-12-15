@@ -15,7 +15,11 @@ References
 - Limits: [docs/LIMITS.md](docs/LIMITS.md)
 - Performance: [docs/PERFORMANCE.md](docs/PERFORMANCE.md)
 - IO modules: [usm/io/car.py](usm/io/car.py), [usm/io/mdf.py](usm/io/mdf.py), [usm/io/pdb.py](usm/io/pdb.py), [usm/bundle/io.py](usm/bundle/io.py)
-- Selected workspaces: [workspaces/mxn_dop_graft_v1/run.py](workspaces/mxn_dop_graft_v1/run.py), [workspaces/mxn_f_sub_v2/run.py](workspaces/mxn_f_sub_v2/run.py), [workspaces/mxn_f_rand_csr_v2/run.py](workspaces/mxn_f_rand_csr_v2/run.py), [workspaces/mxn_orientation_v1/run.py](workspaces/mxn_orientation_v1/run.py), [workspaces/mxn_zbins_v1/run.py](workspaces/mxn_zbins_v1/run.py), [workspaces/replace_remove_dop_v1/run.py](workspaces/replace_remove_dop_v1/run.py), [workspaces/mxn_counts_v1/run.py](workspaces/mxn_counts_v1/run.py)
+- Selected workspaces:
+  - Historical/non-existent in this repo (kept for context; not runnable): `workspaces/mxn_dop_graft_v1`
+  - Fluorinated: [workspaces/mxenes/fluorinated/mxn_f_sub_v2/run.py](workspaces/mxenes/fluorinated/mxn_f_sub_v2/run.py:1), [workspaces/mxenes/fluorinated/mxn_f_rand_csr_v2/run.py](workspaces/mxenes/fluorinated/mxn_f_rand_csr_v2/run.py:1)
+  - Analysis: [workspaces/mxenes/analysis/mxn_orientation_v1/run.py](workspaces/mxenes/analysis/mxn_orientation_v1/run.py:1), [workspaces/mxenes/analysis/mxn_zbins_v1/run.py](workspaces/mxenes/analysis/mxn_zbins_v1/run.py:1), [workspaces/mxenes/analysis/mxn_counts_v1/run.py](workspaces/mxenes/analysis/mxn_counts_v1/run.py:1)
+  - Dopamine: [workspaces/mxenes/dopamine/replace_remove_dop_v1/run.py](workspaces/mxenes/dopamine/replace_remove_dop_v1/run.py:1)
 
 1. Goals
 - Reduce complexity and ceremony while preserving fidelity and determinism
@@ -81,12 +85,14 @@ Required behavior
 - summary.json includes inputs, parameters, counts, metrics, and output file paths
 
 Reference implementations
-- Grafting: [workspaces/mxn_dop_graft_v1/run.py](workspaces/mxn_dop_graft_v1/run.py), bottom side variant [workspaces/mxn_dop_graft_bottom_v1/run.py](workspaces/mxn_dop_graft_bottom_v1/run.py)
-- Substitution: [workspaces/mxn_f_sub_v2/run.py](workspaces/mxn_f_sub_v2/run.py), bonds based variant [workspaces/mxn_f_sub_v1/run.py](workspaces/mxn_f_sub_v1/run.py)
-- CSR selection and visualization: [workspaces/mxn_f_rand_csr_v2/run.py](workspaces/mxn_f_rand_csr_v2/run.py)
-- Orientation analysis: [workspaces/mxn_orientation_v1/run.py](workspaces/mxn_orientation_v1/run.py)
-- Z bin counts and type counts: [workspaces/mxn_zbins_v1/run.py](workspaces/mxn_zbins_v1/run.py), [workspaces/mxn_counts_v1/run.py](workspaces/mxn_counts_v1/run.py)
-- Targeted edit workflow: [workspaces/replace_remove_dop_v1/run.py](workspaces/replace_remove_dop_v1/run.py)
+- Grafting:
+  - Historical/non-existent in this repo (kept for context; not runnable): `workspaces/mxn_dop_graft_v1`, `workspaces/mxn_dop_graft_bottom_v1`
+- Substitution:
+  - [workspaces/mxenes/fluorinated/mxn_f_sub_v2/run.py](workspaces/mxenes/fluorinated/mxn_f_sub_v2/run.py:1), bonds based variant [workspaces/mxenes/fluorinated/mxn_f_sub_v1/run.py](workspaces/mxenes/fluorinated/mxn_f_sub_v1/run.py:1)
+- CSR selection and visualization: [workspaces/mxenes/fluorinated/mxn_f_rand_csr_v2/run.py](workspaces/mxenes/fluorinated/mxn_f_rand_csr_v2/run.py:1)
+- Orientation analysis: [workspaces/mxenes/analysis/mxn_orientation_v1/run.py](workspaces/mxenes/analysis/mxn_orientation_v1/run.py:1)
+- Z bin counts and type counts: [workspaces/mxenes/analysis/mxn_zbins_v1/run.py](workspaces/mxenes/analysis/mxn_zbins_v1/run.py:1), [workspaces/mxenes/analysis/mxn_counts_v1/run.py](workspaces/mxenes/analysis/mxn_counts_v1/run.py:1)
+- Targeted edit workflow: [workspaces/mxenes/dopamine/replace_remove_dop_v1/run.py](workspaces/mxenes/dopamine/replace_remove_dop_v1/run.py:1)
 
 7. Library surface to stabilize
 IO
@@ -111,7 +117,7 @@ Grafting related ops
 - Orientation frames and torsion tilt scanning
 - Clash checks and acceptance policies
 - Placement result manifest model with metrics
-Reference scripts: [workspaces/mxn_dop_graft_v1/run.py](workspaces/mxn_dop_graft_v1/run.py), [workspaces/mxn_dop_graft_bottom_v1/run.py](workspaces/mxn_dop_graft_bottom_v1/run.py)
+Reference scripts (historical/non-existent in this repo; not runnable): `workspaces/mxn_dop_graft_v1`, `workspaces/mxn_dop_graft_bottom_v1`
 
 8. Helpers to centralize in usm ops
 The following functions exist in multiple workspaces and should be moved into shared modules to reduce duplication and ensure uniform behavior.
@@ -119,26 +125,26 @@ The following functions exist in multiple workspaces and should be moved into sh
 Surface split and side counts
 - Threshold computation with auto, median, and midrange strategies
 - Side count helpers for reporting top versus bottom counts for given types
-Sources: [workspaces/mxn_f_sub_v2/run.py](workspaces/mxn_f_sub_v2/run.py), [workspaces/mxn_f_all_v1/run.py](workspaces/mxn_f_all_v1/run.py), [workspaces/mxn_zbins_v1/run.py](workspaces/mxn_zbins_v1/run.py)
+Sources: [workspaces/mxenes/fluorinated/mxn_f_sub_v2/run.py](workspaces/mxenes/fluorinated/mxn_f_sub_v2/run.py:1), [workspaces/mxenes/fluorinated/mxn_f_all_v1/run.py](workspaces/mxenes/fluorinated/mxn_f_all_v1/run.py:1), [workspaces/mxenes/analysis/mxn_zbins_v1/run.py](workspaces/mxenes/analysis/mxn_zbins_v1/run.py:1)
 
 OH pairing
 - Distance based greedy nearest neighbor matching between O and H
 - Bonds based neighbor extraction for O to H
-Sources: [workspaces/mxn_f_all_v1/run.py](workspaces/mxn_f_all_v1/run.py), [workspaces/mxn_f_sub_v1/run.py](workspaces/mxn_f_sub_v1/run.py), [workspaces/mxn_f_sub_v2/run.py](workspaces/mxn_f_sub_v2/run.py)
+Sources: [workspaces/mxenes/fluorinated/mxn_f_all_v1/run.py](workspaces/mxenes/fluorinated/mxn_f_all_v1/run.py:1), [workspaces/mxenes/fluorinated/mxn_f_sub_v1/run.py](workspaces/mxenes/fluorinated/mxn_f_sub_v1/run.py:1), [workspaces/mxenes/fluorinated/mxn_f_sub_v2/run.py](workspaces/mxenes/fluorinated/mxn_f_sub_v2/run.py:1)
 
 MDF connections preservation helpers
 - Build map of key to raw connections
 - Cleanse tokens when removing or replacing atoms
-Sources: [workspaces/mxn_f_all_v1/run.py](workspaces/mxn_f_all_v1/run.py), [workspaces/mxn_f_sub_v2/run.py](workspaces/mxn_f_sub_v2/run.py)
+Sources: [workspaces/mxenes/fluorinated/mxn_f_all_v1/run.py](workspaces/mxenes/fluorinated/mxn_f_all_v1/run.py:1), [workspaces/mxenes/fluorinated/mxn_f_sub_v2/run.py](workspaces/mxenes/fluorinated/mxn_f_sub_v2/run.py:1)
 
 CSR selection utilities
 - Ripley metric based best of trials selection
 - Gallery sampling and plotting integration hooks
-Source: [workspaces/mxn_f_rand_csr_v2/run.py](workspaces/mxn_f_rand_csr_v2/run.py)
+Source: [workspaces/mxenes/fluorinated/mxn_f_rand_csr_v2/run.py](workspaces/mxenes/fluorinated/mxn_f_rand_csr_v2/run.py:1)
 
 9. Workspace template
 Add a template directory with the following minimal pieces to accelerate new workflows:
-- run.py patterned after [workspaces/mxn_counts_v1/run.py](workspaces/mxn_counts_v1/run.py) with standardized logging and summary writing
+- run.py patterned after [workspaces/mxenes/analysis/mxn_counts_v1/run.py](workspaces/mxenes/analysis/mxn_counts_v1/run.py:1) with standardized logging and summary writing
 - config.json defaults for inputs and outputs
 - outputs directory created on first run
 
@@ -213,7 +219,7 @@ Grafting pattern
 - Place guest per site using torsion and tilt scanning with clash checks
 - Optionally resize orthorhombic cell and wrap to avoid visual wrap around
 - Save CAR and MDF with normalized connections and write placements manifest and summary
-Reference: [workspaces/mxn_dop_graft_v1/run.py](workspaces/mxn_dop_graft_v1/run.py)
+Reference (historical/non-existent in this repo; not runnable): `workspaces/mxn_dop_graft_v1`
 
 Substitution pattern
 - Identify O and H pairs and select a subset per surface by seed
@@ -221,26 +227,26 @@ Substitution pattern
 - Preserve MDF connections raw tokens where needed or regenerate normalized connections
 - Renumber aids to keep dense ids
 - Save CAR and MDF and write selection manifest and summary
-References: [workspaces/mxn_f_sub_v2/run.py](workspaces/mxn_f_sub_v2/run.py), [workspaces/mxn_f_sub_v1/run.py](workspaces/mxn_f_sub_v1/run.py)
+References: [workspaces/mxenes/fluorinated/mxn_f_sub_v2/run.py](workspaces/mxenes/fluorinated/mxn_f_sub_v2/run.py:1), [workspaces/mxenes/fluorinated/mxn_f_sub_v1/run.py](workspaces/mxenes/fluorinated/mxn_f_sub_v1/run.py:1)
 
 CSR like selection pattern
 - Partition candidate sites by surface using split threshold
 - Run multiple random draw trials and score by Ripley L error
 - Keep the best selection and optionally save a gallery of sampled draws
 - Render 2D plots when matplotlib is available
-Reference: [workspaces/mxn_f_rand_csr_v2/run.py](workspaces/mxn_f_rand_csr_v2/run.py)
+Reference: [workspaces/mxenes/fluorinated/mxn_f_rand_csr_v2/run.py](workspaces/mxenes/fluorinated/mxn_f_rand_csr_v2/run.py:1)
 
 Orientation analysis pattern
 - Select basal sublayer by element and rounded z
 - Compute nearest neighbor in plane distances and vectors
 - Measure absolute angle to plus x and classify zigzag versus armchair
 - Save JSON and TXT and optional plot
-Reference: [workspaces/mxn_orientation_v1/run.py](workspaces/mxn_orientation_v1/run.py)
+Reference: [workspaces/mxenes/analysis/mxn_orientation_v1/run.py](workspaces/mxenes/analysis/mxn_orientation_v1/run.py:1)
 
 Z bins and counts pattern
 - For requested atom types split by z into top and bottom using threshold method
 - Produce JSON CSV and TXT summaries and aggregate totals
-References: [workspaces/mxn_zbins_v1/run.py](workspaces/mxn_zbins_v1/run.py), [workspaces/mxn_counts_v1/run.py](workspaces/mxn_counts_v1/run.py)
+References: [workspaces/mxenes/analysis/mxn_zbins_v1/run.py](workspaces/mxenes/analysis/mxn_zbins_v1/run.py:1), [workspaces/mxenes/analysis/mxn_counts_v1/run.py](workspaces/mxenes/analysis/mxn_counts_v1/run.py:1)
 
 18. Appendix B developer checklist
 - Create workspace template and document usage

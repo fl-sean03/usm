@@ -12,6 +12,11 @@ ATOMS_DTYPES = {
     "element": "string",
     "atom_type": "string",
     "charge": "float32",
+    # Optional per-atom physical / forcefield parameters (nullable)
+    # (Not written to CAR/MDF by default; used by downstream parametrization/export pipelines.)
+    "mass_amu": "float32",
+    "lj_epsilon_kcal_mol": "float32",
+    "lj_sigma_angstrom": "float32",
     "x": "float64",
     "y": "float64",
     "z": "float64",

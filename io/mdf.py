@@ -320,56 +320,41 @@ def _order_token(order: Optional[float]) -> Optional[str]:
     return f"{float(order):g}"
 
 
-def _compose_connections_for_atom(row: pd.Series, atoms_df: pd.DataFrame, bonds_df: Optional[pd.DataFrame],
-                                  write_normalized_connections: bool) -> str:
+def _compose_connections_for_atom(
+    row: pd.Series,
+    aid_to_info: Dict[int, Tuple[str, int, str]],
+    adj_list: Dict[int, List[Tuple[int, float]]],
+    write_normalized_connections: bool
+) -> str:
     # Prefer raw connections when available and lossless mode
     if not write_normalized_connections:
         raw = row.get("connections_raw")
         if isinstance(raw, str) and raw.strip():
             return raw.strip()
 
-    # Build from bonds if present
-    if bonds_df is None or len(bonds_df) == 0:
-        return ""
-
     # Current atom identity
     aid = int(row["aid"])
+    neighbors = adj_list.get(aid)
+    if not neighbors:
+        return ""
+
     src_label = str(row.get("mol_label"))
     try:
         src_index = int(row.get("mol_index"))
     except Exception:
         src_index = 1
 
-    # Build a map aid -> (label, index, name) for the entire system
-    try:
-        aid_vec = atoms_df["aid"].to_numpy().astype(int)
-    except Exception:
-        aid_vec = atoms_df["aid"].astype(int).to_numpy()
-    label_list = atoms_df["mol_label"].astype("string").fillna("XXXX").astype(str).tolist()
-    # mol_index may be nullable Int; coerce safely
-    try:
-        index_vec = atoms_df["mol_index"].to_numpy().astype(int)
-    except Exception:
-        index_vec = pd.to_numeric(atoms_df["mol_index"], errors="coerce").fillna(1).astype(int).to_numpy()
-    name_list = atoms_df["name"].astype("string").fillna("X").astype(str).tolist()
-    aid_to_info = {int(a): (label_list[i], int(index_vec[i]), name_list[i]) for i, a in enumerate(aid_vec)}
-
-    # Collect neighbor tokens from bonds
     tokens: list[str] = []
-    for _, br in bonds_df.iterrows():
-        a1 = int(br["a1"])
-        a2 = int(br["a2"])
-        if a1 != aid and a2 != aid:
-            continue
-        other = a2 if a1 == aid else a1
-        info = aid_to_info.get(int(other))
+    for other_aid, order_val in neighbors:
+        info = aid_to_info.get(other_aid)
         if not info:
             continue
         o_label, o_index, o_name = info
+        
         same_mol = (o_label == src_label) and (int(o_index) == int(src_index))
-        # Compose token: name if same molecule; fully qualified otherwise
         token_base = o_name if same_mol else f"{o_label}_{int(o_index)}:{o_name}"
-        ord_token = _order_token(br.get("order"))
+        
+        ord_token = _order_token(order_val)
         tokens.append(f"{token_base}/{ord_token}" if ord_token else token_base)
 
     return " ".join(tokens)
@@ -434,6 +419,35 @@ def save_mdf(usm: USM, path: str, preserve_headers: bool = True, write_normalize
 
     # Atom lines in aid order
     atoms = usm.atoms.sort_values(by=["aid"]).reset_index(drop=True)
+
+    # Precompute maps for O(N) performance
+    # aid -> (label, index, name)
+    try:
+        aid_vec = atoms["aid"].to_numpy().astype(int)
+    except Exception:
+        aid_vec = atoms["aid"].astype(int).to_numpy()
+    
+    label_list = atoms["mol_label"].astype("string").fillna("XXXX").astype(str).tolist()
+    try:
+        index_vec = atoms["mol_index"].to_numpy().astype(int)
+    except Exception:
+        index_vec = pd.to_numeric(atoms["mol_index"], errors="coerce").fillna(1).astype(int).to_numpy()
+    name_list = atoms["name"].astype("string").fillna("X").astype(str).tolist()
+    
+    aid_to_info = {int(a): (label_list[i], int(index_vec[i]), name_list[i]) for i, a in enumerate(aid_vec)}
+
+    # Precompute adjacency list
+    adj_list: Dict[int, List[Tuple[int, float]]] = {}
+    if usm.bonds is not None and len(usm.bonds) > 0:
+        for _, br in usm.bonds.iterrows():
+            a1 = int(br["a1"])
+            a2 = int(br["a2"])
+            order = float(br.get("order", 1.0))
+            if a1 not in adj_list: adj_list[a1] = []
+            if a2 not in adj_list: adj_list[a2] = []
+            adj_list[a1].append((a2, order))
+            adj_list[a2].append((a1, order))
+
     for _, row in atoms.iterrows():
         mol_label = "XXXX" if pd.isna(row.get("mol_label")) else str(row.get("mol_label"))
         _mol_index_val = row.get("mol_index")
@@ -472,7 +486,7 @@ def save_mdf(usm: USM, path: str, preserve_headers: bool = True, write_normalize
         # Preserve formal_charge token without truncation; align to width 3 only for short tokens
         fc_field = formal_charge if len(formal_charge) > 3 else f"{formal_charge:>3s}"
 
-        conns = _compose_connections_for_atom(row, atoms, usm.bonds, write_normalized_connections)
+        conns = _compose_connections_for_atom(row, aid_to_info, adj_list, write_normalized_connections)
         line = f"{prefix:<18s} {element:>2s} {atom_type:<6s} {charge_group:<6s} {isotope:>5s} {fc_field} {charge:>8s} {switching_atom:d} {oop_flag:d} {chirality_flag:d} {occ_str:>7s}  {xrf_str:>7s}"
         if conns:
             line = f"{line} {conns}"

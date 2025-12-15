@@ -5,8 +5,10 @@ The Unified Structure Model (USM) normalizes Materials Studio CAR and MDF into a
 
 Core modules
 - I/O
+  - [usm/io/__init__.py](usm/io/__init__.py) — Optional convenience aggregator (centralized imports)
   - [usm/io/car.py](usm/io/car.py) — CAR import/export
   - [usm/io/mdf.py](usm/io/mdf.py) — MDF import/export
+  - [usm/io/cif.py](usm/io/cif.py) — CIF import/export (minimal, dependency-free)
   - [usm/io/pdb.py](usm/io/pdb.py) — PDB export (best-effort)
   - [usm/bundle/io.py](usm/bundle/io.py) — USM bundle save/load (Parquet preferred, CSV fallback)
 - Core model/validation
@@ -38,6 +40,15 @@ API reference (selected)
   - save_mdf(usm: USM, path: str, preserve_headers: bool = True, write_normalized_connections: bool = False) -> str
     - Write MDF with lossless connections (connections_raw) when available; normalized tokens when write_normalized_connections=True.
     - Preserved header/footer written byte-for-byte when present.
+
+- CIF (minimal)
+  - load_cif(path: str, *, mol_label: str="XXXX", mol_index: int=1, mol_block_name: Optional[str]=None, expand_symmetry: bool=False) -> USM
+    - Parse lattice parameters and an atom_site loop containing fractional coordinates.
+    - Converts fractional -> Cartesian via USM lattice helpers.
+    - Symmetry expansion is not implemented (must remain False).
+  - save_cif(usm: USM, path: str, *, data_block_name: Optional[str]=None, spacegroup: Optional[str]=None, wrap_frac: bool=True) -> str
+    - Write a minimal CIF with cell parameters + atom_site fractional coordinates computed from USM xyz.
+    - Does not write symmetry operations; writes P 1 when no spacegroup is available.
 
 - PDB
   - save_pdb(usm: USM, path: str, include_conect: bool = False, include_model: bool = False, model_index: int = 1, conect_policy: str = "dedup") -> str
@@ -90,6 +101,7 @@ Usage notes
 - Dtype enforcement: Constructing/returning USM normalizes schema with fixed dtypes and contiguous aids/bids.
 - Coordinates: Always float64 in Å internally; writer format may use fixed-width decimals.
 - Bonds from MDF: Normalized undirected bonds are constructed; original tokens are preserved in connections_raw.
+- CIF: Intended for minimal import/export of cell + atom_site positions. Advanced crystallography (symmetry expansion, disorder models) is out of scope for v0.1.
 - Bundle portability: Parquet recommended (pyarrow/fastparquet), with automatic CSV fallback.
 
 Examples

@@ -10,15 +10,32 @@ from usm.core.model import USM
 KEYS_DEFAULT = ["mol_label", "mol_index", "name"]
 
 
-def compose_on_keys(primary: USM, secondary: USM, keys: Optional[List[str]] = None) -> USM:
+def compose_on_keys(
+    primary: USM,
+    secondary: USM,
+    keys: Optional[List[str]] = None,
+    *,
+    policy: str = "silent",
+    coverage_threshold: float = 0.95,
+    return_report: bool = False,
+) -> USM | tuple[USM, Dict[str, Any]]:
     """
     Compose two USM structures by key-joining their atoms, filling missing columns in 'primary'
     from 'secondary'. Typical use: combine CAR (coords) with MDF (topology/bonds).
 
+    Parameters
     - keys: columns to join on (default ["mol_label","mol_index","name"])
+    - policy: "silent" (default), "warn", or "error_below_coverage"
+      - "silent": compute coverage metrics and attach to provenance["compose_coverage"]
+      - "warn": as silent, and append a parse_notes warning if coverage_ratio < coverage_threshold
+      - "error_below_coverage": raise ValueError if coverage_ratio < coverage_threshold
+    - coverage_threshold: float threshold for coverage policy (default 0.95)
+    - return_report: if True, returns (USM, report_dict) where report_dict mirrors provenance["compose_coverage"]
+
+    Behavior
     - Bonds: prefer secondary bonds if present; otherwise keep primary bonds.
     - Cell: prefer primary cell unless missing (then use secondary).
-    - Provenance/preserved_text: prefer primary, append parse_notes from secondary.
+    - Provenance/preserved_text: prefer primary, append parse_notes from secondary; attach compose_coverage metrics.
     """
     keys = keys or list(KEYS_DEFAULT)
 
@@ -29,6 +46,50 @@ def compose_on_keys(primary: USM, secondary: USM, keys: Optional[List[str]] = No
     for k in keys:
         if k not in a_primary.columns or k not in a_secondary.columns:
             raise ValueError(f"compose_on_keys requires key column '{k}' present in both inputs")
+
+    # Compute composition coverage over UNIQUE key tuples (deterministic last-wins semantics elsewhere)
+    primary_key_tuples = list(a_primary[keys].itertuples(index=False, name=None))
+    secondary_key_tuples = list(a_secondary[keys].itertuples(index=False, name=None))
+    primary_keys_set = set(primary_key_tuples)
+    secondary_keys_set = set(secondary_key_tuples)
+    matched_set = primary_keys_set.intersection(secondary_keys_set)
+    left_only_set = primary_keys_set.difference(secondary_keys_set)
+    right_only_set = secondary_keys_set.difference(primary_keys_set)
+
+    matched_count = len(matched_set)
+    primary_total = len(primary_keys_set)
+    secondary_total = len(secondary_keys_set)
+    left_only_count = len(left_only_set)
+    right_only_count = len(right_only_set)
+    coverage_ratio = matched_count / max(primary_total, 1)
+
+    # Prepare deterministic message and policy handling
+    warn_msg = None
+    coverage_metrics: Dict[str, Any] = {
+        "policy": str(policy),
+        "coverage_threshold": float(coverage_threshold),
+        "keys": list(keys),
+        "matched_count": int(matched_count),
+        "left_only_count": int(left_only_count),
+        "right_only_count": int(right_only_count),
+        "primary_total": int(primary_total),
+        "secondary_total": int(secondary_total),
+        "coverage_ratio": float(coverage_ratio),
+    }
+    if coverage_ratio < float(coverage_threshold):
+        msg = (
+            "compose_on_keys coverage below threshold: "
+            f"ratio={coverage_ratio:.6f} threshold={float(coverage_threshold):.6f} "
+            f"matched={matched_count} left_only={left_only_count} right_only={right_only_count} "
+            f"primary_total={primary_total} secondary_total={secondary_total} "
+            f"keys=[{','.join(keys)}]"
+        )
+        if policy == "warn":
+            warn_msg = msg
+        elif policy == "error_below_coverage":
+            # Raise early with informative message
+            raise ValueError(msg)
+        # policy == "silent": proceed
 
     # Prepare columns to bring from secondary that are missing or NA in primary
     sec_only_cols = [c for c in a_secondary.columns if c not in a_primary.columns]
@@ -116,16 +177,22 @@ def compose_on_keys(primary: USM, secondary: USM, keys: Optional[List[str]] = No
     if not out_cell:
         out_cell = dict(secondary.cell or {})
 
-    # Merge provenance and preserved_text: prefer primary, append note
+    # Merge provenance and preserved_text: prefer primary, append note, attach coverage metrics and optional warning
     provenance = dict(primary.provenance or {})
     pnotes = provenance.get("parse_notes", "")
     append_note = secondary.provenance.get("source_path", None) if secondary.provenance else None
     if append_note:
-        provenance["parse_notes"] = (pnotes + " | " if pnotes else "") + f"composed with {append_note}"
+        pnotes = (pnotes + " | " if pnotes else "") + f"composed with {append_note}"
+    if warn_msg:
+        pnotes = (pnotes + " | " if pnotes else "") + warn_msg
+    if pnotes:
+        provenance["parse_notes"] = pnotes
+    # Attach structured coverage metrics
+    provenance["compose_coverage"] = coverage_metrics
 
     preserved_text = dict(primary.preserved_text or {})
 
-    return USM(
+    out_usm = USM(
         atoms=merged,
         bonds=out_bonds,
         molecules=None,  # optional in v0.1
@@ -133,3 +200,6 @@ def compose_on_keys(primary: USM, secondary: USM, keys: Optional[List[str]] = No
         provenance=provenance,
         preserved_text=preserved_text,
     )
+    if return_report:
+        return out_usm, coverage_metrics
+    return out_usm

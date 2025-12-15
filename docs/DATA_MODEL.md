@@ -11,6 +11,9 @@ Core tables and metadata
     - element: string
     - atom_type: string
     - charge: float32; e
+    - mass_amu: float32; amu (optional / nullable)
+    - lj_epsilon_kcal_mol: float32; kcal/mol (optional / nullable)
+    - lj_sigma_angstrom: float32; Å (optional / nullable)
     - x: float64; Å
     - y: float64; Å
     - z: float64; Å
@@ -20,6 +23,7 @@ Core tables and metadata
     - MDF carry-through (nullable): isotope (string), formal_charge (string), switching_atom (Int8), oop_flag (Int8), chirality_flag (Int8), occupancy (float32), xray_temp_factor (float32), charge_group (string), connections_raw (string; exact MDF tokens)
   - Required columns are enforced in [REQUIRED_ATOM_COLUMNS](usm/core/model.py:53).
   - Dtype enforcement and schema normalization happen in [USM.__post_init__](usm/core/model.py:97).
+  - Note: CAR/MDF writers currently serialize atom_type + charge, but do not serialize mass/LJ fields (these are intended for downstream parameterization pipelines and are preserved in bundles).
 
 - Bonds table (optional)
   - Columns (name: dtype)

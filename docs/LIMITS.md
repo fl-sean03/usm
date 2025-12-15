@@ -9,6 +9,10 @@ Scope and non-goals (v0.1)
   - Orthorhombic behaviors preserved; float64 math; frac↔xyz round-trip property tests ≤ 1e-12
 - Formats
   - Primary focus on Materials Studio CAR/MDF
+  - CIF support is intentionally minimal:
+    - Supports cell parameters + a single `atom_site` loop with fractional coords (see [`load_cif()`](src/usm/io/cif.py:222))
+    - CIF export writes cell + `atom_site` fractional coords (see [`save_cif()`](src/usm/io/cif.py:365))
+    - Symmetry expansion is not implemented (`expand_symmetry=False` only); disorder models and rich crystallographic metadata are out of scope for v0.1
   - PDB exporter: ATOM/TER/END with optional CRYST1; opt-in CONECT (from bonds) and single-model MODEL/ENDMDL framing are available. Defaults preserve prior behavior (no CONECT, no MODEL).
 - GUI or interactive visualization not part of scope
 
