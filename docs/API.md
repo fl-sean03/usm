@@ -20,6 +20,7 @@ Core modules
   - [usm/ops/merge.py](usm/ops/merge.py)
   - [usm/ops/compose.py](usm/ops/compose.py)
   - [usm/ops/renumber.py](usm/ops/renumber.py)
+  - [usm/ops/requirements.py](usm/ops/requirements.py) — Deterministically derive v0.1 `requirements.json` (atom/bond/angle types) from a USM structure.
 
 Data model summary
 See [docs/DATA_MODEL.md](docs/DATA_MODEL.md) for the full schema (columns/dtypes), cell/PBC metadata, preservation strategy, and ID policies.
