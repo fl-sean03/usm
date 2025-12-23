@@ -27,197 +27,27 @@ Public API:
 - save_cif(usm: USM, path: str, *, data_block_name=None, spacegroup=None, wrap_frac=True) -> str
 """
 
-import re
-import shlex
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, Iterator, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 
 from usm.core.model import USM
-from usm.ops.lattice import frac_to_xyz, lattice_inverse, lattice_matrix, xyz_to_frac
+from usm.ops.lattice import frac_to_xyz, lattice_inverse, lattice_matrix, xyz_to_frac, wrap_to_frac
 
-
-_NUM_WITH_ESD_RE = re.compile(r"^([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)(?:\(\d+\))?$")
-
-
-def _strip_quotes(s: str) -> str:
-    if s is None:
-        return ""
-    t = str(s).strip()
-    if len(t) >= 2 and ((t[0] == "'" and t[-1] == "'") or (t[0] == '"' and t[-1] == '"')):
-        return t[1:-1]
-    return t
-
-
-def _parse_cif_number(val: Any, default: float = float("nan")) -> float:
-    """
-    Parse CIF numeric tokens, tolerating uncertainty syntax like "8.9138(12)".
-    """
-    if val is None:
-        return float(default)
-    s = str(val).strip()
-    if not s or s in (".", "?"):
-        return float(default)
-    m = _NUM_WITH_ESD_RE.match(s)
-    if m:
-        try:
-            return float(m.group(1))
-        except Exception:
-            return float(default)
-    try:
-        return float(s)
-    except Exception:
-        return float(default)
-
-
-def _cif_tokenize(lines: Iterable[str]) -> Iterator[str]:
-    """
-    Tokenize CIF text into a flat token stream.
-
-    Supports:
-    - comments starting with '#'
-    - quoted strings with single or double quotes
-    - semicolon-delimited text blocks (starting with ';' in column 1)
-      which are returned as a single token (content excludes the delimiter lines)
-    """
-    it = iter(lines)
-    for raw in it:
-        if raw is None:
-            continue
-
-        # Comment-only line
-        if raw.startswith("#"):
-            continue
-
-        # Semicolon-delimited multi-line text field (CIF)
-        if raw.startswith(";"):
-            buf: List[str] = []
-            for nxt in it:
-                if nxt.startswith(";"):
-                    break
-                buf.append(nxt.rstrip("\n"))
-            yield "\n".join(buf)
-            continue
-
-        # Normal line: strip comments and split
-        line = raw.split("#", 1)[0].strip()
-        if not line:
-            continue
-
-        # shlex handles quoted strings; CIF is close enough for our minimal needs
-        try:
-            parts = shlex.split(line, posix=True)
-        except Exception:
-            parts = line.split()
-
-        for tok in parts:
-            yield tok
-
-
-@dataclass
-class _CifLoop:
-    tags: List[str]
-    rows: List[List[str]]
-
-
-def _parse_cif(tokens: Sequence[str]) -> Tuple[Dict[str, str], List[_CifLoop], Optional[str]]:
-    """
-    Parse a CIF token stream into:
-    - data_items: scalar tag->value mapping (last occurrence wins)
-    - loops: list of loops with tags + row values
-    - data_block_name: last seen data_ name (or None)
-    """
-    data_items: Dict[str, str] = {}
-    loops: List[_CifLoop] = []
-    data_block_name: Optional[str] = None
-
-    i = 0
-    n = len(tokens)
-
-    def _is_stop(tok: str) -> bool:
-        tl = tok.lower()
-        return tl == "loop_" or tl.startswith("data_") or tok.startswith("_")
-
-    while i < n:
-        tok = tokens[i]
-        tl = tok.lower()
-
-        if tl.startswith("data_"):
-            data_block_name = tok[5:]
-            i += 1
-            continue
-
-        if tl == "loop_":
-            i += 1
-            tags: List[str] = []
-            while i < n and tokens[i].startswith("_"):
-                tags.append(tokens[i])
-                i += 1
-
-            vals: List[str] = []
-            while i < n and not _is_stop(tokens[i]):
-                vals.append(tokens[i])
-                i += 1
-
-            if not tags:
-                continue
-
-            rows: List[List[str]] = []
-            width = len(tags)
-            if width > 0:
-                for j in range(0, len(vals), width):
-                    chunk = vals[j : j + width]
-                    if len(chunk) != width:
-                        break
-                    rows.append([str(x) for x in chunk])
-
-            loops.append(_CifLoop(tags=tags, rows=rows))
-            continue
-
-        if tok.startswith("_"):
-            tag = tok
-            i += 1
-            if i < n and not _is_stop(tokens[i]):
-                data_items[tag] = tokens[i]
-                i += 1
-            else:
-                data_items[tag] = ""
-            continue
-
-        i += 1
-
-    return data_items, loops, data_block_name
-
-
-def _find_atom_site_loop(loops: List[_CifLoop]) -> Optional[_CifLoop]:
-    """
-    Find a CIF loop that contains fractional atom site coordinates.
-    """
-    needed = {"_atom_site_fract_x", "_atom_site_fract_y", "_atom_site_fract_z"}
-    for lp in loops:
-        tags = {t.lower() for t in lp.tags}
-        if needed.issubset(tags):
-            return lp
-    return None
-
-
-def _infer_element_from_label(label: str) -> str:
-    """
-    Best-effort element inference from a CIF label like 'Zn1', 'C2', 'H1A'.
-    """
-    s = str(label).strip()
-    if not s:
-        return "X"
-    m = re.match(r"^([A-Za-z]+)", s)
-    if not m:
-        return "X"
-    sym = m.group(1)
-    if len(sym) == 1:
-        return sym.upper()
-    return sym[0].upper() + sym[1:].lower()
+# Import parsing internals from _cif_parser
+from ._cif_parser import (
+    _CifLoop,
+    _cif_tokenize,
+    _find_atom_site_loop,
+    _infer_element_from_label,
+    _parse_cif,
+    _parse_cif_number,
+    _parse_symop_string,
+    _parse_symmetry_code,
+    _strip_quotes,
+)
 
 
 def load_cif(
@@ -227,6 +57,7 @@ def load_cif(
     mol_index: int = 1,
     mol_block_name: Optional[str] = None,
     expand_symmetry: bool = False,
+    sym_tol: float = 0.1,
 ) -> USM:
     """
     Load a CIF into a USM object.
@@ -234,20 +65,34 @@ def load_cif(
     Parameters:
       mol_label/mol_index: populate USM identity columns (CAR/MDF compatibility).
       mol_block_name: stored in atoms['mol_block_name'] (else derived from data_ block name when available).
-      expand_symmetry: not implemented in v0.1; explicit flag to avoid silent behavior changes.
+      expand_symmetry: if True, generate P1 unit cell using symmetry operations and occupancy filtering.
+      sym_tol: Cartesian tolerance (Angstrom) for deduplicating atoms on special positions.
 
     Returns:
-      USM with atoms populated and cell.pbc=True when cell params are present.
-      Bonds are not inferred from CIF.
+      USM with atoms and (if expand_symmetry=True and bonds present) bonds populated.
     """
-    if expand_symmetry:
-        raise NotImplementedError("CIF symmetry expansion is not implemented in this v0.1 loader.")
-
     p = Path(path)
     text = p.read_text(encoding="utf-8", errors="ignore").splitlines()
 
     tokens = list(_cif_tokenize(text))
     data_items, loops, data_name = _parse_cif(tokens)
+
+    # Gather symmetry operators
+    symops: List[Tuple[np.ndarray, np.ndarray]] = []
+    symop_loop = None
+    for lp in loops:
+        if "_space_group_symop_operation_xyz" in [t.lower() for t in lp.tags]:
+            symop_loop = lp
+            break
+
+    if symop_loop:
+        tag_idx = [t.lower() for t in symop_loop.tags].index("_space_group_symop_operation_xyz")
+        for row in symop_loop.rows:
+            symops.append(_parse_symop_string(row[tag_idx]))
+
+    # Fallback to P1 identity if no symops found
+    if not symops:
+        symops.append((np.eye(3), np.zeros(3)))
 
     # Cell parameters (required for meaningful cartesian conversion)
     a = _parse_cif_number(data_items.get("_cell_length_a"))
@@ -282,16 +127,18 @@ def load_cif(
         idx = tag_to_i.get(tag.lower())
         return "" if idx is None or idx >= len(row) else str(row[idx])
 
-    atoms_records: List[Dict[str, Any]] = []
-    frac_rows: List[List[float]] = []
+    A = lattice_matrix(float(a), float(b), float(c), float(alpha), float(beta), float(gamma))
 
+    au_atoms: List[Dict[str, Any]] = []
     for row in lp.rows:
         label = _strip_quotes(_get(row, "_atom_site_label"))
         if not label:
             continue
 
-        type_sym = _strip_quotes(_get(row, "_atom_site_type_symbol"))
-        element = type_sym if type_sym else _infer_element_from_label(label)
+        occupancy = _parse_cif_number(_get(row, "_atom_site_occupancy"), default=1.0)
+        # Rule D1: skip low occupancy (unless tagged framework, but we default to no for solvent)
+        if expand_symmetry and occupancy < 1.0:
+            continue
 
         fx = _parse_cif_number(_get(row, "_atom_site_fract_x"))
         fy = _parse_cif_number(_get(row, "_atom_site_fract_y"))
@@ -300,44 +147,190 @@ def load_cif(
         if not np.isfinite([fx, fy, fz]).all():
             continue
 
-        frac_rows.append([float(fx), float(fy), float(fz)])
+        type_sym = _strip_quotes(_get(row, "_atom_site_type_symbol"))
+        element = type_sym if type_sym else _infer_element_from_label(label)
 
-        atoms_records.append(
-            {
-                "name": str(label),
-                "element": str(element),
-                # No forcefield assignment yet
-                "atom_type": "xx",
-                "charge": np.float32(0.0),
-                # filled after frac conversion
-                "x": np.nan,
-                "y": np.nan,
-                "z": np.nan,
-                "mol_label": str(mol_label),
-                "mol_index": int(mol_index),
-                "mol_block_name": str(mol_block_name if mol_block_name is not None else (data_name or "")),
-            }
+        au_atoms.append(
+            {"label": label, "element": element, "frac": np.array([fx, fy, fz], dtype=np.float64), "occupancy": occupancy}
         )
 
-    if not atoms_records:
+    if not au_atoms:
         raise ValueError(f"No atoms parsed from CIF atom_site loop: {p}")
 
-    # Fractional -> Cartesian conversion
-    A = lattice_matrix(float(a), float(b), float(c), float(alpha), float(beta), float(gamma))
-    frac = np.asarray(frac_rows, dtype=np.float64)
-    xyz = frac_to_xyz(A, frac)
+    atoms_records: List[Dict[str, Any]] = []
+    # Map from (au_idx, op_idx) -> p1_idx for bond resolution
+    au_op_to_p1: Dict[Tuple[int, int], int] = {}
 
-    for i, rec in enumerate(atoms_records):
-        rec["x"] = float(xyz[i, 0])
-        rec["y"] = float(xyz[i, 1])
-        rec["z"] = float(xyz[i, 2])
+    if expand_symmetry:
+        p1_fracs: List[np.ndarray] = []
+        for i_au, au_atom in enumerate(au_atoms):
+            for i_op, (rot, trans) in enumerate(symops):
+                f_new = rot @ au_atom["frac"] + trans
+                f_wrapped = wrap_to_frac(f_new)
+
+                # Deduplicate based on cartesian distance
+                is_duplicate = False
+                pos_cart = frac_to_xyz(A, f_wrapped.reshape(1, 3))[0]
+                for i_p1, existing_f in enumerate(p1_fracs):
+                    existing_cart = frac_to_xyz(A, existing_f.reshape(1, 3))[0]
+                    # Since we wrapped to [0,1), standard dist check is sufficient for unit cell deduplication.
+                    dist = np.linalg.norm(pos_cart - existing_cart)
+                    if dist < sym_tol:
+                        is_duplicate = True
+                        au_op_to_p1[(i_au, i_op)] = i_p1
+                        break
+
+                if not is_duplicate:
+                    p1_idx = len(atoms_records)
+                    p1_fracs.append(f_wrapped)
+                    au_op_to_p1[(i_au, i_op)] = p1_idx
+
+                    xyz = frac_to_xyz(A, f_wrapped.reshape(1, 3))[0]
+                    atoms_records.append(
+                        {
+                            "name": f"{au_atom['label']}_{i_op+1}",
+                            "element": au_atom["element"],
+                            "atom_type": "xx",
+                            "charge": np.float32(0.0),
+                            "x": float(xyz[0]),
+                            "y": float(xyz[1]),
+                            "z": float(xyz[2]),
+                            "mol_label": str(mol_label),
+                            "mol_index": int(mol_index),
+                            "mol_block_name": str(mol_block_name if mol_block_name is not None else (data_name or "")),
+                            "occupancy": float(au_atom["occupancy"]),
+                        }
+                    )
+    else:
+        for i_au, au_atom in enumerate(au_atoms):
+            xyz = frac_to_xyz(A, au_atom["frac"].reshape(1, 3))[0]
+            atoms_records.append(
+                {
+                    "name": au_atom["label"],
+                    "element": au_atom["element"],
+                    "atom_type": "xx",
+                    "charge": np.float32(0.0),
+                    "x": float(xyz[0]),
+                    "y": float(xyz[1]),
+                    "z": float(xyz[2]),
+                    "mol_label": str(mol_label),
+                    "mol_index": int(mol_index),
+                    "mol_block_name": str(mol_block_name if mol_block_name is not None else (data_name or "")),
+                    "occupancy": float(au_atom["occupancy"]),
+                }
+            )
 
     atoms_df = pd.DataFrame(atoms_records)
+
+    # Bond Perception / Parsing
+    bonds_records: List[Dict[str, Any]] = []
+    bond_loop = None
+    for lp in loops:
+        tags = {t.lower() for t in lp.tags}
+        if "_geom_bond_atom_site_label_1" in tags and "_geom_bond_atom_site_label_2" in tags:
+            bond_loop = lp
+            break
+
+    if bond_loop:
+        btags = [t.lower() for t in bond_loop.tags]
+        idx1 = btags.index("_geom_bond_atom_site_label_1")
+        idx2 = btags.index("_geom_bond_atom_site_label_2")
+        idx_sym = btags.index("_geom_bond_site_symmetry_2") if "_geom_bond_site_symmetry_2" in btags else -1
+
+        label_to_au_idx = {a["label"]: i for i, a in enumerate(au_atoms)}
+
+        for brow in bond_loop.rows:
+            l1, l2 = _strip_quotes(brow[idx1]), _strip_quotes(brow[idx2])
+            if l1 not in label_to_au_idx or l2 not in label_to_au_idx:
+                continue
+
+            au_idx1 = label_to_au_idx[l1]
+            au_idx2 = label_to_au_idx[l2]
+            sym_code = _strip_quotes(brow[idx_sym]) if idx_sym >= 0 else "."
+            op_idx_rel, t_rel = _parse_symmetry_code(sym_code)
+
+            if expand_symmetry:
+                # For each operator k, create the expanded bond
+                for i_op1, (rot1, trans1) in enumerate(symops):
+                    # Atom 1 in P1
+                    f1_raw = rot1 @ au_atoms[au_idx1]["frac"] + trans1
+                    f1_wrapped = wrap_to_frac(f1_raw)
+                    s1 = np.floor(f1_raw + 1e-8).astype(np.int32)
+
+                    # Atom 2 in P1
+                    # The CIF bond is between AU1 and M_rel(AU2) + T_rel
+                    # Applying M1 to both: M1(AU1) and M1(M_rel(AU2) + T_rel)
+                    rot_rel, trans_rel = symops[op_idx_rel]
+                    f2_raw = rot1 @ (rot_rel @ au_atoms[au_idx2]["frac"] + trans_rel + t_rel) + trans1
+                    f2_wrapped = wrap_to_frac(f2_raw)
+                    s2 = np.floor(f2_raw + 1e-8).astype(np.int32)
+
+                    # Find P1 indices
+                    p1_idx1 = au_op_to_p1.get((au_idx1, i_op1), -1)
+                    p1_idx2 = -1
+
+                    # For p1_idx2, search p1_fracs
+                    pos2_cart = frac_to_xyz(A, f2_wrapped.reshape(1, 3))[0]
+                    # Note: p1_fracs is not accessible here, let's use atoms_records for coords
+                    for i_p1, rec in enumerate(atoms_records):
+                        existing_cart = np.array([rec["x"], rec["y"], rec["z"]], dtype=np.float64)
+                        if np.linalg.norm(pos2_cart - existing_cart) < sym_tol:
+                            p1_idx2 = i_p1
+                            break
+
+                    if p1_idx1 >= 0 and p1_idx2 >= 0:
+                        shift = s2 - s1
+                        bonds_records.append(
+                            {
+                                "a1": int(p1_idx1),
+                                "a2": int(p1_idx2),
+                                "ix": int(shift[0]),
+                                "iy": int(shift[1]),
+                                "iz": int(shift[2]),
+                                "order": 1.0,
+                                "type": "single",
+                            }
+                        )
+            else:
+                # Minimal load: just AU bond
+                bonds_records.append(
+                    {
+                        "a1": int(au_idx1),
+                        "a2": int(au_idx2),
+                        "ix": int(t_rel[0]),
+                        "iy": int(t_rel[1]),
+                        "iz": int(t_rel[2]),
+                        "order": 1.0,
+                        "type": "single",
+                    }
+                )
+
+    # Deduplicate bonds
+    if bonds_records:
+        unique_bonds = {}
+        for b in bonds_records:
+            # Canonicalize
+            a1, a2 = b["a1"], b["a2"]
+            ix, iy, iz = b["ix"], b["iy"], b["iz"]
+            if a1 > a2:
+                a1, a2 = a2, a1
+                ix, iy, iz = -ix, -iy, -iz
+            elif a1 == a2:
+                # Self bond: ensure lexicographically positive shift
+                if ix < 0 or (ix == 0 and iy < 0) or (ix == 0 and iy == 0 and iz < 0):
+                    ix, iy, iz = -ix, -iy, -iz
+
+            key = (a1, a2, ix, iy, iz)
+            if key not in unique_bonds:
+                unique_bonds[key] = b
+        bonds_df = pd.DataFrame(list(unique_bonds.values()))
+    else:
+        bonds_df = None
 
     provenance = {
         "source_format": "cif",
         "source_path": str(p),
-        "parse_notes": "",
+        "parse_notes": f"expand_symmetry={expand_symmetry}",
     }
     preserved_text = {
         "cif_data_block": data_name or "",
@@ -345,7 +338,9 @@ def load_cif(
         "cif_lines": text,
     }
 
-    usm = USM(atoms=atoms_df, bonds=None, molecules=None, cell=cell, provenance=provenance, preserved_text=preserved_text)
+    usm = USM(
+        atoms=atoms_df, bonds=bonds_df, molecules=None, cell=cell, provenance=provenance, preserved_text=preserved_text
+    )
     usm.validate_basic()
     return usm
 
@@ -366,6 +361,7 @@ def _format_cif_float(x: float, prec: int = 10) -> str:
 
 
 def _wrap01(frac: np.ndarray) -> np.ndarray:
+    """Wrap fractional coordinates to [0, 1)."""
     return frac - np.floor(frac)
 
 

@@ -39,6 +39,9 @@ BONDS_DTYPES = {
     "bid": "Int32",
     "a1": "Int32",
     "a2": "Int32",
+    "ix": "Int32",
+    "iy": "Int32",
+    "iz": "Int32",
     "order": "float32",
     "type": "string",
     "source": "string",
@@ -113,12 +116,34 @@ class USM:
         if self.bonds is not None:
             self.bonds = self.bonds.copy()
             self.bonds = _ensure_columns(self.bonds, BONDS_DTYPES)
+            # Default missing image flags to 0
+            for col in ["ix", "iy", "iz"]:
+                if self.bonds[col].isna().any():
+                    self.bonds.loc[self.bonds[col].isna(), col] = 0
             self.bonds = _astype_with_nullable(self.bonds, BONDS_DTYPES)
             a1 = self.bonds["a1"].to_numpy()
             a2 = self.bonds["a2"].to_numpy()
             swap = a1 > a2
             if swap.any():
                 self.bonds.loc[swap, ["a1", "a2"]] = self.bonds.loc[swap, ["a2", "a1"]].to_numpy()
+                # Negate image flags on swap
+                for col in ["ix", "iy", "iz"]:
+                    self.bonds.loc[swap, col] = -self.bonds.loc[swap, col]
+
+            # Lexicographical normalization for self-bonds (a1 == a2)
+            # Ensure (ix, iy, iz) is lexicographically positive
+            a1_now = self.bonds["a1"].to_numpy()
+            a2_now = self.bonds["a2"].to_numpy()
+            self_bonds = (a1_now == a2_now)
+            if self_bonds.any():
+                ix = self.bonds.loc[self_bonds, "ix"].to_numpy()
+                iy = self.bonds.loc[self_bonds, "iy"].to_numpy()
+                iz = self.bonds.loc[self_bonds, "iz"].to_numpy()
+                neg = (ix < 0) | ((ix == 0) & (iy < 0)) | ((ix == 0) & (iy == 0) & (iz < 0))
+                if neg.any():
+                    for col in ["ix", "iy", "iz"]:
+                        self.bonds.loc[self_bonds & neg, col] = -self.bonds.loc[self_bonds & neg, col]
+
             self.bonds["bid"] = np.arange(len(self.bonds), dtype=np.int32)
 
         if self.molecules is not None:

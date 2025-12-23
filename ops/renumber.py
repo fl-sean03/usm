@@ -24,6 +24,10 @@ def _remap_bonds_for_new_aids(bonds: Optional[pd.DataFrame], aid_map: Dict[int, 
         a2[swap] = tmp
     out["a1"] = a1
     out["a2"] = a2
+    if swap.any():
+        for col in ["ix", "iy", "iz"]:
+            if col in out.columns:
+                out.loc[swap, col] = -out.loc[swap, col]
     return out.reset_index(drop=True)
 
 

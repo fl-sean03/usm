@@ -36,6 +36,72 @@ def translate(usm: USM, delta: ArrayLike, in_place: bool = False) -> USM:
     return out
 
 
+def shift_mins_to_zero(
+    usm: USM,
+    axes: Tuple[str, ...] = ("x", "y", "z"),
+    *,
+    finite_only: bool = True,
+    in_place: bool = False,
+    return_delta: bool = False,
+) -> USM | tuple[USM, np.ndarray]:
+    """Translate coordinates so the minimum finite coordinate becomes 0.0 per axis.
+
+    Determinism
+    -----------
+    - The translation vector depends only on the min reduction of finite coordinates, so
+      it is independent of atom row order.
+
+    NaN / non-finite handling
+    -------------------------
+    - If finite_only=True (default), only rows with all of x/y/z finite contribute to
+      the mins computation.
+    - Non-finite coordinates are still translated (NaN stays NaN under addition).
+    - If no finite rows exist, this is a no-op.
+
+    Parameters
+    ----------
+    axes:
+        Coordinate columns to shift. Must be a subset of ("x","y","z").
+    finite_only:
+        If True, compute mins from rows where all xyz are finite.
+    in_place:
+        If True, mutate the input USM; otherwise operate on a copy.
+    return_delta:
+        If True, return (usm_out, delta_xyz).
+    """
+
+    out = _copy_or_inplace(usm, in_place)
+    axes_set = set(axes)
+    valid = {"x", "y", "z"}
+    if not axes_set.issubset(valid):
+        raise ValueError(f"axes must be subset of {sorted(valid)}")
+
+    xyz = out.atoms[["x", "y", "z"]].to_numpy(dtype=np.float64)
+    if finite_only:
+        mask = np.isfinite(xyz).all(axis=1)
+        if not bool(mask.any()):
+            delta = np.zeros(3, dtype=np.float64)
+            return (out, delta) if return_delta else out
+        mins = np.min(xyz[mask], axis=0)
+    else:
+        # Numpy min will propagate NaN; caller responsibility.
+        mins = np.min(xyz, axis=0)
+
+    delta = np.zeros(3, dtype=np.float64)
+    if "x" in axes_set:
+        delta[0] = -float(mins[0])
+    if "y" in axes_set:
+        delta[1] = -float(mins[1])
+    if "z" in axes_set:
+        delta[2] = -float(mins[2])
+
+    if not np.allclose(delta, 0.0):
+        xyz = xyz + delta[None, :]
+        out.atoms.loc[:, ["x", "y", "z"]] = xyz
+
+    return (out, delta) if return_delta else out
+
+
 def rotation_matrix_from_axis_angle(axis: ArrayLike, angle_deg: float) -> np.ndarray:
     """
     Create a 3x3 rotation matrix using Rodrigues' formula.

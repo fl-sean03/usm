@@ -168,9 +168,17 @@ def xyz_to_frac(A_inv: np.ndarray, xyz) -> np.ndarray:
     return frac.reshape(3,) if was1d else frac
 
 
+def wrap_to_frac(frac: np.ndarray) -> np.ndarray:
+    """
+    Wrap fractional coordinates into [0, 1).
+    """
+    return frac - np.floor(frac + 1e-8)
+
+
 __all__ = [
     "lattice_matrix",
     "lattice_inverse",
     "frac_to_xyz",
     "xyz_to_frac",
+    "wrap_to_frac",
 ]

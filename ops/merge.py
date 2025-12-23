@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import List, Dict, Any, Optional, Tuple
 import numpy as np
 import pandas as pd
@@ -56,6 +57,109 @@ def _assert_cells_compatible(usms: List[USM], policy: str) -> Dict[str, Any]:
     raise ValueError(f"Unknown cell reconcile policy: {policy}")
 
 
+def _extract_name_parts(name: str) -> Tuple[str, int]:
+    """Extract base and numeric suffix from atom name.
+    
+    Examples:
+        'C1' -> ('C', 1)
+        'H2A' -> ('H2A', 0)  # suffix not purely numeric
+        'Zn1' -> ('Zn', 1)
+        'O2' -> ('O', 2)
+        'N3' -> ('N', 3)
+    """
+    match = re.match(r'^([A-Za-z]+)(\d+)$', str(name))
+    if match:
+        return match.group(1), int(match.group(2))
+    return str(name), 0
+
+
+def _update_connections_raw(df: pd.DataFrame, name_mapping: Dict[str, str]) -> pd.DataFrame:
+    """Update connections_raw column with renamed atom names.
+    
+    Args:
+        df: DataFrame with 'connections_raw' column
+        name_mapping: Dict mapping old atom names to new names
+        
+    Returns:
+        DataFrame with updated connections_raw values
+    """
+    if "connections_raw" not in df.columns or not name_mapping:
+        return df
+    
+    def update_conn(conn_str: Any) -> Any:
+        if not isinstance(conn_str, str) or not conn_str.strip():
+            return conn_str
+        tokens = conn_str.split()
+        new_tokens = []
+        for tok in tokens:
+            # Handle bond order suffix like "C1/2.0"
+            if "/" in tok:
+                name_part, order_part = tok.split("/", 1)
+                new_name = name_mapping.get(name_part, name_part)
+                new_tokens.append(f"{new_name}/{order_part}")
+            else:
+                new_tokens.append(name_mapping.get(tok, tok))
+        return " ".join(new_tokens)
+    
+    df = df.copy()
+    df["connections_raw"] = df["connections_raw"].apply(update_conn)
+    return df
+
+
+def _ensure_unique_names(atoms_parts: List[pd.DataFrame]) -> List[pd.DataFrame]:
+    """Ensure all atom names are unique across merged structure.
+    
+    When atoms from different structures have the same name, the atoms from
+    subsequent structures are renamed to avoid collisions. The first structure's
+    names are always preserved.
+    
+    Args:
+        atoms_parts: List of atom DataFrames, one per source structure
+        
+    Returns:
+        List of atom DataFrames with unique names across all structures
+    """
+    all_names: set = set()
+    result: List[pd.DataFrame] = []
+    
+    for idx, df in enumerate(atoms_parts):
+        df = df.copy()
+        
+        if "name" not in df.columns:
+            result.append(df)
+            continue
+            
+        name_mapping: Dict[str, str] = {}  # old_name -> new_name
+        new_names = []
+        
+        for name in df["name"].astype(str):
+            if name in all_names:
+                # Collision! Generate new unique name
+                base, num = _extract_name_parts(name)
+                # Find next available suffix
+                suffix = max(num, 1) + 1
+                new_name = f"{base}{suffix}"
+                while new_name in all_names:
+                    suffix += 1
+                    new_name = f"{base}{suffix}"
+                name_mapping[name] = new_name
+                new_names.append(new_name)
+                all_names.add(new_name)
+            else:
+                new_names.append(name)
+                all_names.add(name)
+        
+        df["name"] = new_names
+        
+        # Update connections_raw if present and we renamed atoms
+        if name_mapping:
+            df = _update_connections_raw(df, name_mapping)
+        
+        result.append(df)
+    
+    return result
+
+
 def merge_structures(usms: List[USM], cell_policy: str = "strict") -> USM:
     """
     Merge multiple USM structures into one.
@@ -102,6 +206,9 @@ def merge_structures(usms: List[USM], cell_policy: str = "strict") -> USM:
             bonds_parts.append(b)
 
         running_offset += len(a)
+
+    # Ensure unique atom names across all structures
+    atoms_parts = _ensure_unique_names(atoms_parts)
 
     out_atoms = pd.concat(atoms_parts, ignore_index=True)
     out_bonds = pd.concat(bonds_parts, ignore_index=True) if bonds_parts else None
@@ -183,11 +290,14 @@ def merge_preserving_first(usm_first: USM, usm_second: USM, cell_policy: str = "
         b2["a1"] = a1c
         b2["a2"] = a2c
 
-    # Concatenate atoms (first unchanged)
-    out_atoms = pd.concat(
-        [a1.sort_values("aid").reset_index(drop=True), a2_sorted],
-        ignore_index=True
-    )
+    # Ensure unique atom names across both structures
+    atoms_parts = _ensure_unique_names([
+        a1.sort_values("aid").reset_index(drop=True),
+        a2_sorted
+    ])
+    
+    # Concatenate atoms (first unchanged, second may have renamed atoms)
+    out_atoms = pd.concat(atoms_parts, ignore_index=True)
 
     # Concatenate bonds
     if b1 is not None and b2 is not None:
