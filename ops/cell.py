@@ -13,9 +13,8 @@ Key functions:
 - auto_resize_cell_auto(usm, ...): automatically decide which axes and padding to apply based on current positions and cell
 """
 
-from typing import Iterable, Tuple, Sequence
+from typing import Tuple, Sequence
 import numpy as np
-import pandas as pd
 
 from usm.core.model import USM
 from usm.ops.transform import wrap_to_cell

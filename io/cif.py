@@ -38,7 +38,6 @@ from usm.ops.lattice import frac_to_xyz, lattice_inverse, lattice_matrix, xyz_to
 
 # Import parsing internals from _cif_parser
 from ._cif_parser import (
-    _CifLoop,
     _cif_tokenize,
     _find_atom_site_loop,
     _infer_element_from_label,
@@ -254,7 +253,7 @@ def load_cif(
                 for i_op1, (rot1, trans1) in enumerate(symops):
                     # Atom 1 in P1
                     f1_raw = rot1 @ au_atoms[au_idx1]["frac"] + trans1
-                    f1_wrapped = wrap_to_frac(f1_raw)
+                    _ = wrap_to_frac(f1_raw)  # side effect: validates frac coords
                     s1 = np.floor(f1_raw + 1e-8).astype(np.int32)
 
                     # Atom 2 in P1

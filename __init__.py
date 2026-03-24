@@ -112,8 +112,8 @@ class USM:
                 raise ValueError(f"Non-finite values found in atoms.{col}")
 
         # Metadata minimums
-        prov = self.metadata.setdefault("provenance", {})
-        preserved = self.metadata.setdefault("preserved_text", {})
+        self.metadata.setdefault("provenance", {})
+        self.metadata.setdefault("preserved_text", {})
         cell = self.metadata.setdefault("cell", {"pbc": False})
         if "pbc" not in cell:
             cell["pbc"] = False
@@ -198,7 +198,7 @@ def _scan_header_footer(lines: List[str]) -> Tuple[List[str], List[Tuple[int, Di
     footer_lines = lines[last_idx + 1 :]
 
     # Extract minimal header meta
-    header_text = "".join(header_lines)
+    _ = "".join(header_lines)  # noqa: F841 — legacy code, will be removed in Phase 1
     date_line = next((ln for ln in header_lines if ln.startswith(_DATE_PREFIX)), None)
     pbc_eq_line = next((ln for ln in header_lines if _PBC_EQ.match(ln.strip())), None)
     pbc_cell_line = next((ln for ln in header_lines if _PBC_CELL.match(ln.strip())), None)

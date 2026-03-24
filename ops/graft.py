@@ -19,7 +19,6 @@ from dataclasses import dataclass, asdict
 from typing import Dict, Iterable, List, Optional, Tuple
 
 import numpy as np
-import pandas as pd
 
 from usm.core.model import USM
 from usm.ops.renumber import renumber_atoms

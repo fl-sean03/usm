@@ -20,7 +20,6 @@ from typing import Dict, Iterable, List, Optional, Tuple, Any
 from time import perf_counter
 
 import numpy as np
-import pandas as pd
 
 # Optional SciPy KD-tree for neighbor acceleration
 try:
@@ -31,7 +30,7 @@ except Exception:  # pragma: no cover
 
 from usm.core.model import USM
 from usm.ops.renumber import renumber_atoms
-from usm.ops.merge import merge_structures, merge_preserving_first
+from usm.ops.merge import merge_preserving_first
 from usm.ops.select import select_by_mask
 from usm.ops.frames import (
     find_aid_by_name,

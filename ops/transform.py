@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from typing import Iterable, Tuple, Union, Optional
+from typing import Iterable, Tuple, Union
 import numpy as np
-import pandas as pd
 
 from usm.core.model import USM
 from usm.ops.lattice import lattice_matrix, lattice_inverse, xyz_to_frac, frac_to_xyz
