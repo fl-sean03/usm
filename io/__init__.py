@@ -15,6 +15,7 @@ from .car import load_car, save_car
 from .mdf import load_mdf, save_mdf
 from .pdb import save_pdb, load_pdb
 from .cif import load_cif, save_cif
+from .loader import load
 
 __all__ = [
     "load_car",
@@ -25,4 +26,5 @@ __all__ = [
     "load_pdb",
     "load_cif",
     "save_cif",
+    "load",
 ]
