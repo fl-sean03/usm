@@ -15,8 +15,8 @@ def _remap_bonds_for_new_aids(bonds: Optional[pd.DataFrame], aid_map: Dict[int, 
     out["a2"] = out["a2"].map(aid_map)
     out = out.dropna(subset=["a1", "a2"]).copy()
     # Normalize a1 < a2
-    a1 = out["a1"].astype("int32").to_numpy()
-    a2 = out["a2"].astype("int32").to_numpy()
+    a1 = out["a1"].astype("int32").to_numpy().copy()
+    a2 = out["a2"].astype("int32").to_numpy().copy()
     swap = a1 > a2
     if swap.any():
         tmp = a1[swap].copy()

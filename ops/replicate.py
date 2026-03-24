@@ -174,11 +174,11 @@ def replicate_supercell(usm: USM, na: int, nb: int, nc: int, add_image_indices: 
         bcat = pd.concat(super_bonds_list, ignore_index=True)
         
         # Normalize a1 < a2 is handled by USM post_init, but let's do it here for deduplication safety
-        a1v = bcat["a1"].to_numpy()
-        a2v = bcat["a2"].to_numpy()
-        ixv = bcat["ix"].to_numpy()
-        iyv = bcat["iy"].to_numpy()
-        izv = bcat["iz"].to_numpy()
+        a1v = bcat["a1"].to_numpy().copy()
+        a2v = bcat["a2"].to_numpy().copy()
+        ixv = bcat["ix"].to_numpy().copy()
+        iyv = bcat["iy"].to_numpy().copy()
+        izv = bcat["iz"].to_numpy().copy()
         
         swap = a1v > a2v
         if swap.any():
