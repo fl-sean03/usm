@@ -13,7 +13,7 @@ Newer/centralized imports can use:
 
 from .car import load_car, save_car
 from .mdf import load_mdf, save_mdf
-from .pdb import save_pdb
+from .pdb import save_pdb, load_pdb
 from .cif import load_cif, save_cif
 
 __all__ = [
@@ -22,6 +22,7 @@ __all__ = [
     "load_mdf",
     "save_mdf",
     "save_pdb",
+    "load_pdb",
     "load_cif",
     "save_cif",
 ]
