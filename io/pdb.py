@@ -275,7 +275,7 @@ def load_pdb(path: str, *, mol_label: str = "XXXX", mol_index: int = 1) -> USM:
                 serial = int(line[6:11])
                 name = line[12:16].strip()
                 res_name = line[17:20].strip()
-                chain_id = line[21:22].strip() or "A"
+                _chain_id = line[21:22].strip() or "A"  # noqa: F841 — reserved for future mol_label mapping
                 res_seq = int(line[22:26]) if line[22:26].strip() else 1
                 x = float(line[30:38])
                 y = float(line[38:46])
