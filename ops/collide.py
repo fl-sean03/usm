@@ -7,7 +7,7 @@ This module provides vectorized minimum-distance and clash checks between two
 sets of atoms, with optional SciPy KD-tree acceleration when available.
 """
 
-from typing import Iterable, Optional, Tuple
+from typing import Iterable, Optional
 import numpy as np
 
 from usm.core.model import USM

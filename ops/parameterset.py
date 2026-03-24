@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Union
 
-import numpy as np
 import pandas as pd
 
 
@@ -37,13 +36,7 @@ class ParameterSetDerivationError(ValueError):
         return "; ".join(parts)
 
 
-def _norm_str(value: Any, *, where: str) -> str:
-    if not isinstance(value, str):
-        raise ValueError(f"{where}: expected str, got {type(value).__name__}")
-    s = value.strip()
-    if not s:
-        raise ValueError(f"{where}: must be a non-empty string")
-    return s
+from usm.ops._canonicalize import _norm_str
 
 
 def derive_parameterset_v0_1_2(structure: Any) -> dict[str, Any]:

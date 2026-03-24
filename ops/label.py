@@ -7,7 +7,7 @@ These helpers manage (mol_label, mol_index) assignments so that each cloned
 guest molecule receives a unique mol_index within its label namespace.
 """
 
-from typing import Optional, Iterable, Tuple
+from typing import Optional
 import numpy as np
 import pandas as pd
 

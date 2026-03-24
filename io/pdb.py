@@ -226,4 +226,160 @@ def save_pdb(
     return str(out_path)
 
 
-__all__ = ["save_pdb"]
+def load_pdb(path: str, *, mol_label: str = "XXXX", mol_index: int = 1) -> USM:
+    """Load a PDB file into a USM structure.
+
+    Parses CRYST1 (cell), ATOM/HETATM (coordinates), and CONECT (bonds).
+    PDB v3.30 fixed-width column format.
+
+    Args:
+        path: Path to PDB file.
+        mol_label: Default molecule label for atoms.
+        mol_index: Default molecule index.
+
+    Returns:
+        USM with atoms, optional bonds, and optional cell.
+    """
+    import pandas as pd
+
+    text = Path(path).read_text(encoding="utf-8")
+    lines = text.splitlines()
+
+    atom_rows: list[dict[str, Any]] = []
+    conect_pairs: list[tuple[int, int]] = []
+    cell: dict[str, Any] = {"pbc": False}
+    serial_to_idx: dict[int, int] = {}
+
+    for line in lines:
+        record = line[:6].strip()
+
+        if record == "CRYST1" and len(line) >= 54:
+            try:
+                a = float(line[6:15])
+                b = float(line[15:24])
+                c = float(line[24:33])
+                alpha = float(line[33:40])
+                beta = float(line[40:47])
+                gamma = float(line[47:54])
+                cell = {
+                    "pbc": True,
+                    "a": a, "b": b, "c": c,
+                    "alpha": alpha, "beta": beta, "gamma": gamma,
+                    "spacegroup": line[55:66].strip() if len(line) > 55 else "",
+                }
+            except ValueError:
+                pass
+
+        elif record in ("ATOM", "HETATM") and len(line) >= 54:
+            try:
+                serial = int(line[6:11])
+                name = line[12:16].strip()
+                res_name = line[17:20].strip()
+                _chain_id = line[21:22].strip() or "A"  # noqa: F841 — reserved for future mol_label mapping
+                res_seq = int(line[22:26]) if line[22:26].strip() else 1
+                x = float(line[30:38])
+                y = float(line[38:46])
+                z = float(line[46:54])
+            except ValueError:
+                continue
+
+            # Occupancy and B-factor (optional)
+            occupancy = 1.0
+            b_factor = 0.0
+            if len(line) >= 60:
+                try:
+                    occupancy = float(line[54:60])
+                except ValueError:
+                    pass
+            if len(line) >= 66:
+                try:
+                    b_factor = float(line[60:66])
+                except ValueError:
+                    pass
+
+            # Element from columns 77-78, fallback to name inference
+            element = ""
+            if len(line) >= 78:
+                element = line[76:78].strip()
+            if not element:
+                element = "".join(c for c in name if c.isalpha())[:2]
+                if len(element) > 1:
+                    element = element[0].upper() + element[1].lower()
+                else:
+                    element = element.upper()
+
+            idx = len(atom_rows)
+            serial_to_idx[serial] = idx
+
+            atom_rows.append({
+                "aid": idx,
+                "name": name,
+                "element": element,
+                "atom_type": element,  # PDB doesn't carry FF types
+                "charge": 0.0,
+                "x": x, "y": y, "z": z,
+                "mol_label": mol_label,
+                "mol_index": res_seq,
+                "mol_block_name": res_name,
+                "occupancy": occupancy,
+                "xray_temp_factor": b_factor,
+            })
+
+        elif record == "CONECT" and len(line) >= 11:
+            try:
+                serial1 = int(line[6:11])
+            except ValueError:
+                continue
+            # Up to 4 bonded serials per CONECT line
+            for i in range(11, min(len(line), 31), 5):
+                chunk = line[i:i + 5].strip()
+                if chunk:
+                    try:
+                        serial2 = int(chunk)
+                        if serial1 != serial2:
+                            conect_pairs.append((serial1, serial2))
+                    except ValueError:
+                        pass
+
+    if not atom_rows:
+        raise ValueError(f"load_pdb: no ATOM/HETATM records found in {path}")
+
+    atoms_df = pd.DataFrame(atom_rows)
+
+    # Build bonds from CONECT (deduplicate, canonicalize a1 < a2)
+    bonds_df = None
+    if conect_pairs:
+        seen: set[tuple[int, int]] = set()
+        bond_rows: list[dict[str, Any]] = []
+        for s1, s2 in conect_pairs:
+            idx1 = serial_to_idx.get(s1)
+            idx2 = serial_to_idx.get(s2)
+            if idx1 is None or idx2 is None:
+                continue
+            a1, a2 = (idx1, idx2) if idx1 < idx2 else (idx2, idx1)
+            if (a1, a2) not in seen:
+                seen.add((a1, a2))
+                bond_rows.append({
+                    "bid": len(bond_rows),
+                    "a1": a1, "a2": a2,
+                    "ix": 0, "iy": 0, "iz": 0,
+                    "order": 1.0,
+                    "type": "single",
+                    "source": "pdb.conect",
+                    "order_raw": None,
+                    "mol_index": None,
+                    "notes": None,
+                })
+        if bond_rows:
+            bonds_df = pd.DataFrame(bond_rows)
+
+    return USM(
+        atoms=atoms_df,
+        bonds=bonds_df,
+        cell=cell,
+        provenance={"format": "pdb", "path": str(path)},
+        preserved_text={},
+    )
+
+
+__all__ = ["save_pdb", "load_pdb"]

@@ -17,7 +17,7 @@ Provides:
 - apply_torsion_and_tilt: compose torsion-about-normal and small outward tilt about a plane axis
 """
 
-from typing import Iterable, Optional, Sequence, List, Tuple
+from typing import Iterable, Optional, Sequence, List
 import numpy as np
 
 from usm.core.model import USM
