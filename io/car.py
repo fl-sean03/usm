@@ -66,25 +66,59 @@ def _detect_atom_line(line: str) -> bool:
 
 
 def _split_header_atoms_footer(lines: List[str]) -> Tuple[List[str], List[str], List[str]]:
+    """Split CAR file lines into header, atom lines, and footer.
+
+    Materials Studio writes multi-molecule CAR files with one ``end`` line
+    between each molecule group and a final ``end`` terminator at the end of
+    the file (followed by a second bare ``end``).  A single-molecule file has
+    exactly two consecutive ``end`` lines at the bottom.
+
+    Strategy: collect atom lines across all molecule blocks by treating an
+    ``end`` line as a *potential* molecule separator rather than a hard stop.
+    Peek ahead — if an atom line follows the ``end``, it was an inter-molecule
+    separator and we stay in atom-collection mode.  Only when ``end`` is
+    followed by another ``end`` (or EOF) do we treat it as the real terminator
+    and enter footer mode.
+    """
     header: List[str] = []
     atoms: List[str] = []
     footer: List[str] = []
     mode = "header"
-    for ln in lines:
+    # Work with a peekable index so we can look ahead past "end" lines.
+    i = 0
+    stripped = [ln.rstrip("\n") for ln in lines]
+    while i < len(stripped):
+        ln = stripped[i]
         if mode == "header":
             if _detect_atom_line(ln):
                 mode = "atoms"
-                atoms.append(ln.rstrip("\n"))
+                atoms.append(ln)
             else:
-                header.append(ln.rstrip("\n"))
+                header.append(ln)
+            i += 1
         elif mode == "atoms":
             if ln.strip().lower().startswith("end"):
-                mode = "footer"
-                footer.append(ln.rstrip("\n"))
+                # Look ahead to decide if this is an inter-molecule separator
+                # or the real terminator.
+                j = i + 1
+                # Skip any additional "end" lines to find the next non-end line.
+                while j < len(stripped) and stripped[j].strip().lower().startswith("end"):
+                    j += 1
+                if j < len(stripped) and _detect_atom_line(stripped[j]):
+                    # There are more atoms after this "end" — it was a
+                    # between-molecule separator.  Skip the "end" and continue.
+                    i += 1  # consume the separator "end"
+                else:
+                    # No more atom lines follow — this is the real terminator.
+                    mode = "footer"
+                    footer.append(ln)
+                    i += 1
             else:
-                atoms.append(ln.rstrip("\n"))
+                atoms.append(ln)
+                i += 1
         else:
-            footer.append(ln.rstrip("\n"))
+            footer.append(ln)
+            i += 1
     return header, atoms, footer
 
 
