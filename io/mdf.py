@@ -108,13 +108,50 @@ def _order_token(order: Optional[float]) -> Optional[str]:
     return f"{float(order):g}"
 
 
+# Default Materials Studio image index for synthesized PBC suffixes (the
+# original ``#i`` from the source MDF is not preserved on the parsed Bond;
+# see docs/MDF_PARSER_AUDIT.md F3).
+_DEFAULT_MDF_IMAGE_INDEX = 1
+
+
+def _image_suffix_token(ix: int, iy: int, iz: int) -> Optional[str]:
+    """Format ``(ix, iy, iz)`` as a Materials Studio ``%abc#i`` suffix.
+
+    Returns ``None`` for the same-cell shift ``(0, 0, 0)`` so callers can
+    drop the suffix entirely. Each axis is required to be a single signed
+    digit (``-9 <= shift <= 9``); shifts outside that range are clamped to
+    fit the grammar with a warning recorded only in the ``notes`` column
+    upstream (not here).
+    """
+    if (ix, iy, iz) == (0, 0, 0):
+        return None
+
+    def _axis(v: int) -> str:
+        # Materials Studio grammar is one signed digit per axis. We clamp
+        # to [-9, 9] to keep the output parseable by Materials Studio; for
+        # the foreseeable real-world shifts (typically [-1, 1]) this is a
+        # no-op. Out-of-range shifts indicate a bug upstream.
+        v = max(-9, min(9, int(v)))
+        return str(v)
+
+    return f"%{_axis(ix)}{_axis(iy)}{_axis(iz)}#{_DEFAULT_MDF_IMAGE_INDEX}"
+
+
 def _compose_connections_for_atom(
     row: pd.Series,
     aid_to_info: Dict[int, Tuple[str, int, str]],
-    adj_list: Dict[int, List[Tuple[int, float]]],
+    adj_list: Dict[int, List[Tuple[int, float, int, int, int]]],
     write_normalized_connections: bool
 ) -> str:
-    """Compose the connections field string for a single atom."""
+    """Compose the connections field string for a single atom.
+
+    In normalized mode the writer reconstructs each connection token from
+    the bonds table, including the periodic-image suffix when the bond
+    carries a non-zero ``(ix, iy, iz)``. The shift is signed *from the
+    perspective of the source atom*: an entry on atom ``a1`` with shift
+    ``(+1, 0, 0)`` writes ``partner%100#1``, while the reciprocal entry on
+    ``a2`` writes ``partner%-100#1``.
+    """
     # Prefer raw connections when available and lossless mode
     if not write_normalized_connections:
         raw = row.get("connections_raw")
@@ -134,17 +171,23 @@ def _compose_connections_for_atom(
         src_index = 1
 
     tokens: list[str] = []
-    for other_aid, order_val in neighbors:
+    for other_aid, order_val, ix, iy, iz in neighbors:
         info = aid_to_info.get(other_aid)
         if not info:
             continue
         o_label, o_index, o_name = info
-        
+
         same_mol = (o_label == src_label) and (int(o_index) == int(src_index))
         token_base = o_name if same_mol else f"{o_label}_{int(o_index)}:{o_name}"
-        
+
+        # Append the PBC image suffix when non-zero. The suffix sits between
+        # the bare name and the optional ``/order`` part, per Materials
+        # Studio's wire format.
+        img_token = _image_suffix_token(ix, iy, iz)
+        token_with_img = f"{token_base}{img_token}" if img_token else token_base
+
         ord_token = _order_token(order_val)
-        tokens.append(f"{token_base}/{ord_token}" if ord_token else token_base)
+        tokens.append(f"{token_with_img}/{ord_token}" if ord_token else token_with_img)
 
     return " ".join(tokens)
 
@@ -225,17 +268,35 @@ def save_mdf(usm: USM, path: str, preserve_headers: bool = True, write_normalize
     
     aid_to_info = {int(a): (label_list[i], int(index_vec[i]), name_list[i]) for i, a in enumerate(aid_vec)}
 
-    # Precompute adjacency list
-    adj_list: Dict[int, List[Tuple[int, float]]] = {}
+    # Precompute adjacency list. Each entry is
+    # ``(partner_aid, order, ix, iy, iz)`` where ``(ix, iy, iz)`` is the
+    # shift of the partner's image *as seen from this atom*. The reciprocal
+    # entry on the partner negates the shift so the synthesized MDF text
+    # remains a self-consistent description of the same bond.
+    adj_list: Dict[int, List[Tuple[int, float, int, int, int]]] = {}
     if usm.bonds is not None and len(usm.bonds) > 0:
+        # Cache column access by name to handle Bond rows that may or may
+        # not carry the PBC columns (older USMs / non-MDF sources).
+        has_pbc = all(c in usm.bonds.columns for c in ("ix", "iy", "iz"))
         for _, br in usm.bonds.iterrows():
             a1 = int(br["a1"])
             a2 = int(br["a2"])
             order = float(br.get("order", 1.0))
-            if a1 not in adj_list: adj_list[a1] = []
-            if a2 not in adj_list: adj_list[a2] = []
-            adj_list[a1].append((a2, order))
-            adj_list[a2].append((a1, order))
+            if has_pbc:
+                _ix = br.get("ix")
+                _iy = br.get("iy")
+                _iz = br.get("iz")
+                ix = 0 if pd.isna(_ix) else int(_ix)
+                iy = 0 if pd.isna(_iy) else int(_iy)
+                iz = 0 if pd.isna(_iz) else int(_iz)
+            else:
+                ix = iy = iz = 0
+            if a1 not in adj_list:
+                adj_list[a1] = []
+            if a2 not in adj_list:
+                adj_list[a2] = []
+            adj_list[a1].append((a2, order, ix, iy, iz))
+            adj_list[a2].append((a1, order, -ix, -iy, -iz))
 
     for _, row in atoms.iterrows():
         mol_label = "XXXX" if pd.isna(row.get("mol_label")) else str(row.get("mol_label"))

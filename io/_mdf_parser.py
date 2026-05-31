@@ -45,6 +45,81 @@ MDF_LINE_RE = re.compile(
 PREFIX_RE = re.compile(r"^(?P<mol_label>[A-Za-z0-9]+)_(?P<mol_index>\d+):(?P<name>\S+)$")
 
 
+# Materials Studio MDF connection-token periodic-image suffix:
+#
+#   ``%abc#i``
+#
+# where ``a``, ``b``, ``c`` are each a single signed digit shift along the
+# corresponding cell axis (a, b, c), and ``i`` is the Materials Studio image
+# index (positive integer; internal bookkeeping with no geometric meaning, so
+# we preserve it on ``connections_raw`` but not on the parsed Bond).
+#
+# Examples seen in Sean's real MDF corpus:
+#   ``%100#3``    → ix=+1, iy=0,  iz=0
+#   ``%010#1``    → ix=0,  iy=+1, iz=0
+#   ``%0-10#1``   → ix=0,  iy=-1, iz=0
+#   ``%110#3``    → ix=+1, iy=+1, iz=0
+#   ``%-1-10#5``  → ix=-1, iy=-1, iz=0
+#
+# A complete corpus scan (~/Backups/Dropbox/**/*.mdf) found only six distinct
+# patterns, all matching this regex. See docs/MDF_PARSER_AUDIT.md §1.
+_MDF_PBC_SUFFIX_RE = re.compile(r"%(-?\d)(-?\d)(-?\d)#(\d+)")
+
+
+def _parse_image_suffix(token: str) -> Tuple[str, Tuple[int, int, int]]:
+    """Split a Materials Studio MDF connection token's PBC suffix.
+
+    Wire format::
+
+        NAME[%abc#i][/order]
+
+    where ``a``, ``b``, ``c`` are each a single signed digit shift along the
+    corresponding cell axis, and ``i`` is the Materials Studio image index
+    (positive integer; internal bookkeeping with no geometric meaning).
+
+    The image index ``i`` is **not** returned — it is preserved on
+    ``connections_raw`` for any caller that needs the original text. The
+    Bond model's ``(ix, iy, iz)`` carries the full geometric content of the
+    suffix.
+
+    Parameters
+    ----------
+    token : str
+        A single whitespace-delimited connection token, e.g. ``"cb%100#1"``.
+        May or may not include a ``%abc#i`` suffix and/or a ``/order`` part.
+
+    Returns
+    -------
+    (bare_token, shift) : tuple[str, tuple[int, int, int]]
+        ``bare_token`` is the input with the ``%abc#i`` suffix removed (the
+        ``/order`` part, if any, is left intact). ``shift`` is ``(ix, iy, iz)``,
+        or ``(0, 0, 0)`` if no recognizable suffix is present.
+
+    Examples
+    --------
+    >>> _parse_image_suffix("cb%100#1")
+    ('cb', (1, 0, 0))
+    >>> _parse_image_suffix("H%0-10#1")
+    ('H', (0, -1, 0))
+    >>> _parse_image_suffix("XXXX_825:C%0-10#1")
+    ('XXXX_825:C', (0, -1, 0))
+    >>> _parse_image_suffix("H")
+    ('H', (0, 0, 0))
+    >>> _parse_image_suffix("Al1%-1-10#5/1.5")
+    ('Al1/1.5', (-1, -1, 0))
+    """
+    if not isinstance(token, str) or not token:
+        return token, (0, 0, 0)
+    m = _MDF_PBC_SUFFIX_RE.search(token)
+    if m is None:
+        return token, (0, 0, 0)
+    ix = int(m.group(1))
+    iy = int(m.group(2))
+    iz = int(m.group(3))
+    bare = token[: m.start()] + token[m.end():]
+    return bare, (ix, iy, iz)
+
+
 def split_sections(lines: List[str]) -> Tuple[List[str], List[str], List[str]]:
     """
     Split MDF file into header lines, atom/topology lines, and footer lines.
@@ -153,18 +228,33 @@ def parse_atom_line(line: str, default_mol_block_name: Optional[str]) -> Dict[st
 
 
 def build_bonds_from_connections(atoms_df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Convert connections_raw into a normalized undirected bonds table:
+    """Convert ``connections_raw`` into a normalized undirected bonds table.
 
-    Token grammar supported:
-      - Simple name within same label/index scope: target[/order]            e.g., H/1.0
-      - Fully qualified target: LABEL_INDEX:NAME[/order]                     e.g., XXXX_1729:H
-      - Optional Materials Studio suffixes after '%' are ignored             e.g., XXXX_825:C%0-10#1
+    Token grammar supported (one space-delimited token per partner)::
 
-    Rules:
-      - order defaults to 1.0 when omitted
-      - If token contains LABEL_INDEX:NAME, use that label/index; otherwise use the source atom's (mol_label, mol_index)
-      - Deduplicate by sorted (a1, a2)
+        NAME[%abc#i][/order]
+        LABEL_INDEX:NAME[%abc#i][/order]
+
+    - ``NAME`` / ``LABEL_INDEX:NAME`` resolves the partner atom. A bare
+      ``NAME`` is scoped to the source atom's ``(mol_label, mol_index)``.
+    - ``%abc#i`` is the Materials Studio periodic-image suffix; ``a``, ``b``,
+      ``c`` are signed single digits giving the partner image's shift along
+      the ``(a, b, c)`` cell axes. ``i`` is the Materials Studio image index
+      and is preserved only on ``connections_raw``. See
+      ``_parse_image_suffix`` for the grammar and ``docs/MDF_PARSER_AUDIT.md``
+      for the design discussion.
+    - ``/order`` is the bond order; defaults to ``1.0``.
+
+    Bond rows are deduplicated by ``(a1, a2, ix, iy, iz)`` *after*
+    canonicalization (``a1 <= a2`` with sign-flipped shift on swap), so two
+    bonds between the same pair into different periodic images are kept as
+    distinct rows. A self-image bond (``A — A%abc#i``) is emitted with the
+    recovered shift; the USM constructor renormalizes the shift to
+    lexicographically positive (see ``USM.__post_init__``).
+
+    Tokens whose partner can't be resolved (unknown ``NAME`` in the source
+    scope, or unknown ``LABEL_INDEX:NAME``) are silently skipped — matching
+    the historical permissive behavior.
     """
     # Map (mol_label, mol_index, name) -> aid
     key_to_aid: Dict[Tuple[str, int, str], int] = {}
@@ -174,18 +264,28 @@ def build_bonds_from_connections(atoms_df: pd.DataFrame) -> pd.DataFrame:
 
     tgt_prefix_re = re.compile(r"^(?P<label>[A-Za-z0-9]+)_(?P<idx>\d+):(?P<name>\S+)$")
 
-    def parse_target_token(tok: str, src_label: str, src_index: int) -> Tuple[str, int, str, Optional[float], Optional[str]]:
+    def parse_target_token(
+        tok: str, src_label: str, src_index: int
+    ) -> Tuple[str, int, str, Optional[float], Optional[str], Tuple[int, int, int]]:
+        # Peel off the PBC image suffix first. Materials Studio emits the
+        # ``%abc#i`` suffix on the bare name, before the optional ``/order``,
+        # but the regex is unambiguous either way so we don't depend on order.
+        bare, shift = _parse_image_suffix(tok)
+
         # Split order part if present
         order_val: Optional[float] = None
         order_raw: Optional[str] = None
-        base = tok
-        if "/" in tok:
-            base, order_raw = tok.split("/", 1)
+        base = bare
+        if "/" in bare:
+            base, order_raw = bare.split("/", 1)
             try:
                 order_val = float(order_raw)
             except Exception:
                 order_val = None
-        # Strip any Materials Studio constraint suffix after '%' on the base token
+        # Defensive: strip any leftover ``%...`` we didn't recognize. The
+        # known grammar is exhausted above, but Materials Studio occasionally
+        # emits non-PBC ``%`` annotations that should not contaminate the
+        # partner name. Treat unrecognized suffixes as same-cell.
         if "%" in base:
             base = base.split("%", 1)[0]
 
@@ -198,10 +298,12 @@ def build_bonds_from_connections(atoms_df: pd.DataFrame) -> pd.DataFrame:
             label = m.group("label")
             idx = int(m.group("idx"))
             name = m.group("name")
-        return label, idx, name, order_val, order_raw
+        return label, idx, name, order_val, order_raw, shift
 
     bonds: List[Dict[str, Any]] = []
-    seen = set()
+    # Dedup key includes the canonical shift so that distinct PBC images of
+    # the same pair are kept as distinct rows. See docs/MDF_PARSER_AUDIT.md §4.2.
+    seen: set = set()
 
     for _, r in atoms_df.iterrows():
         src_aid = int(r["aid"])
@@ -212,25 +314,46 @@ def build_bonds_from_connections(atoms_df: pd.DataFrame) -> pd.DataFrame:
             continue
         tokens = str(raw).split()
         for tok in tokens:
-            t_label, t_idx, t_name, order_val, order_raw = parse_target_token(tok, src_label, src_index)
+            t_label, t_idx, t_name, order_val, order_raw, shift = parse_target_token(
+                tok, src_label, src_index
+            )
             key = (t_label, t_idx, t_name)
             tgt_aid = key_to_aid.get(key)
             if tgt_aid is None:
                 # Could not resolve token; skip
                 continue
-            a1, a2 = (src_aid, int(tgt_aid))
-            if a1 == a2:
-                continue
+
+            # Canonicalize (a1, a2) with a1 <= a2, flipping the shift sign on
+            # swap so that ``shift`` always describes the offset of ``a2``'s
+            # image relative to ``a1``'s canonical position. The USM
+            # constructor performs the same renormalization, but we do it
+            # here as well so the dedup key sees the canonical form.
+            a1 = src_aid
+            a2 = int(tgt_aid)
+            ix, iy, iz = shift
             if a2 < a1:
                 a1, a2 = a2, a1
-            pair = (a1, a2)
-            if pair in seen:
+                ix, iy, iz = -ix, -iy, -iz
+
+            # Self-image bond (a1 == a2, non-zero shift): keep it; the USM
+            # constructor will lex-positive-normalize the shift.
+            # Same-cell self-bond (a1 == a2, zero shift): drop it (legacy
+            # behavior; a same-cell self-bond is malformed input).
+            if a1 == a2 and (ix, iy, iz) == (0, 0, 0):
                 continue
-            seen.add(pair)
+
+            pair_key = (a1, a2, ix, iy, iz)
+            if pair_key in seen:
+                continue
+            seen.add(pair_key)
+
             bonds.append(
                 {
                     "a1": a1,
                     "a2": a2,
+                    "ix": int(ix),
+                    "iy": int(iy),
+                    "iz": int(iz),
                     "order": float(order_val) if order_val is not None else float(1.0),
                     "order_raw": order_raw if order_raw is not None else pd.NA,
                     "type": pd.NA,
@@ -241,7 +364,12 @@ def build_bonds_from_connections(atoms_df: pd.DataFrame) -> pd.DataFrame:
             )
 
     if not bonds:
-        return pd.DataFrame(columns=["a1", "a2", "order", "order_raw", "type", "source", "mol_index", "notes"])
+        return pd.DataFrame(
+            columns=[
+                "a1", "a2", "ix", "iy", "iz",
+                "order", "order_raw", "type", "source", "mol_index", "notes",
+            ]
+        )
     bonds_df = pd.DataFrame(bonds)
     # bid and a1<a2 normalization handled by USM constructor
     return bonds_df

@@ -35,6 +35,22 @@ ATOMS_DTYPES = {
     "connections_raw": "string",
 }
 
+# Bond row schema.
+#
+# Image-flag semantics (``ix``, ``iy``, ``iz``):
+#   With the canonical ordering ``a1 <= a2``, ``(ix, iy, iz)`` is the
+#   integer shift of ``a2``'s periodic image relative to ``a1``'s
+#   canonical-cell position, measured in cell-axis multiples. A same-cell
+#   bond has ``(0, 0, 0)``. Swapping ``a1 <-> a2`` negates the shift; this
+#   is performed automatically by :class:`USM.__post_init__`.
+#
+#   For self-image bonds (``a1 == a2``) the constructor additionally
+#   renormalizes the shift to be lexicographically positive so that the
+#   forward and reverse image-pairs map to the same row.
+#
+#   The MDF reader populates these from the Materials Studio ``%abc#i``
+#   periodic-image suffix; see ``usm.io._mdf_parser._parse_image_suffix``
+#   and ``docs/MDF_PARSER_AUDIT.md``.
 BONDS_DTYPES = {
     "bid": "Int32",
     "a1": "Int32",
